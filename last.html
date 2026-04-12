@@ -1,0 +1,2529 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>نظام القيادة والسيطرة - القوات المسلحة السعودية</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;600;700&family=Cairo:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --neon: #00ff9d;
+            --neon-dim: rgba(0,255,157,0.15);
+            --neon-glow: 0 0 8px #00ff9d, 0 0 20px rgba(0,255,157,0.4);
+            --danger: #ff3b3b;
+            --warning: #ffb700;
+            --info: #00b4ff;
+            --bg-dark: rgba(2, 10, 6, 0.92);
+            --bg-panel: rgba(4, 18, 10, 0.88);
+            --border: rgba(0,255,157,0.3);
+        }
+        *, *::before, *::after { box-sizing: border-box; }
+        body, html { margin:0; padding:0; height:100%; background:#000; font-family:'Cairo',monospace; overflow:hidden; cursor:crosshair; }
+        #map { height:100vh; width:100%; filter:brightness(0.75) saturate(1.1) contrast(1.05); }
+
+        .panel { position:absolute; z-index:1000; background:var(--bg-panel); border:1px solid var(--border); color:var(--neon); padding:14px 16px; box-shadow:0 0 20px rgba(0,255,157,0.1),inset 0 0 30px rgba(0,255,157,0.03); border-radius:4px; backdrop-filter:blur(4px); }
+        .panel h2,.panel h3 { margin:0 0 10px 0; font-family:'Rajdhani',sans-serif; font-size:13px; letter-spacing:2px; text-transform:uppercase; border-bottom:1px solid var(--border); padding-bottom:6px; color:var(--neon); text-shadow:var(--neon-glow); }
+
+        #top-bar { top:0; left:0; right:0; height:44px; border-radius:0; border-top:none; border-left:none; border-right:none; display:flex; align-items:center; justify-content:space-between; padding:0 20px; background:rgba(2,10,6,0.95); }
+        #top-bar .title { font-family:'Rajdhani',sans-serif; font-size:15px; letter-spacing:3px; text-shadow:var(--neon-glow); }
+        #top-bar .status-row { display:flex; gap:24px; font-size:11px; color:#aaa; }
+        #top-bar .status-row span { color:var(--neon); }
+        .blink { animation:blink 1.2s step-end infinite; }
+        @keyframes blink { 50%{opacity:0;} }
+
+        #weapon-panel { top:60px; left:16px; width:290px; max-height:calc(100vh - 80px); overflow-y:auto; }
+        .weapon-btn { background:transparent; border:1px solid var(--border); color:var(--neon); width:100%; padding:10px 12px; margin:4px 0; cursor:pointer; text-align:right; font-family:'Cairo',sans-serif; font-size:11px; border-radius:3px; transition:all 0.2s; position:relative; overflow:hidden; }
+        .weapon-btn:hover { border-color:var(--neon); background:var(--neon-dim); }
+        .weapon-btn.active { background:var(--neon); color:#000; font-weight:700; box-shadow:var(--neon-glow); }
+        .weapon-range { font-size:10px; color:#888; display:block; margin-top:2px; }
+        .weapon-btn.active .weapon-range { color:#004d20; }
+
+        #step-guide { font-size:11px; color:#666; margin:8px 0; line-height:1.8; }
+        #step-guide .step { display:flex; align-items:center; gap:6px; }
+        #step-guide .step-num { width:18px; height:18px; border:1px solid #444; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:10px; flex-shrink:0; }
+        #step-guide .step.done .step-num { border-color:var(--neon); color:var(--neon); }
+        #tracking-badge { display:none; background:rgba(255,180,0,0.15); border:1px solid var(--warning); color:var(--warning); font-size:11px; padding:5px 10px; border-radius:3px; margin:6px 0; text-align:center; animation:blink 1.2s step-end infinite; }
+
+        #radar-panel { top:60px; right:16px; width:260px; }
+        .stat-row { display:flex; justify-content:space-between; font-size:12px; padding:5px 0; border-bottom:1px solid rgba(0,255,157,0.07); }
+        .stat-row .label { color:#666; }
+        .stat-row .value { color:var(--neon); font-family:'Rajdhani',sans-serif; letter-spacing:1px; }
+        .stat-row .value.danger { color:var(--danger); }
+        .stat-row .value.warning { color:var(--warning); }
+
+        #mini-radar { width:100%; aspect-ratio:1; margin-top:12px; border:1px solid var(--border); border-radius:50%; position:relative; overflow:hidden; background:radial-gradient(circle,rgba(0,255,157,0.05) 0%,transparent 70%); }
+        #mini-radar canvas { width:100%; height:100%; }
+
+        #base-info-panel { bottom:16px; left:50%; transform:translateX(-50%); width:420px; display:none; text-align:center; }
+        #base-info-name { font-size:16px; margin:4px 0; }
+        #base-info-type { font-size:11px; color:#888; }
+        #base-fire-btn { margin-top:10px; background:var(--danger); border:none; color:#fff; padding:10px 30px; cursor:pointer; font-family:'Cairo',sans-serif; font-size:13px; border-radius:3px; letter-spacing:2px; box-shadow:0 0 15px var(--danger); display:none; transition:all 0.2s; }
+        #base-fire-btn:hover { background:#ff6060; box-shadow:0 0 25px var(--danger); }
+
+        #event-log { bottom:16px; right:16px; width:260px; max-height:160px; overflow:hidden; }
+        .log-entry { font-size:11px; padding:3px 0; border-bottom:1px solid rgba(0,255,157,0.06); animation:fadeIn 0.3s ease; }
+        .log-entry .time { color:#555; margin-left:6px; }
+        .log-entry.success { color:var(--neon); }
+        .log-entry.fail { color:var(--danger); }
+        .log-entry.info { color:var(--info); }
+        @keyframes fadeIn { from{opacity:0;transform:translateY(-5px);}to{opacity:1;transform:none;} }
+
+        #range-warning { position:absolute; z-index:2000; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(255,59,59,0.9); color:#fff; padding:12px 24px; font-size:14px; border-radius:4px; display:none; pointer-events:none; border:1px solid var(--danger); box-shadow:0 0 30px var(--danger); text-align:center; }
+        @keyframes flashIn { from{transform:translate(-50%,-50%) scale(0.8);opacity:0;}to{transform:translate(-50%,-50%) scale(1);opacity:1;} }
+
+        /* ===== BASE MARKERS — distinctive aircraft symbol ===== */
+        .base-wrapper {
+            position: relative;
+            width: 44px; height: 44px;
+            cursor: pointer;
+        }
+        /* Plane/star shape using SVG-like CSS */
+        .base-icon-air {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%,-50%);
+            width: 26px; height: 26px;
+            background: #0099ff;
+            clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+            box-shadow: 0 0 14px #0099ff, 0 0 28px rgba(0,150,255,0.5);
+            transition: all 0.15s;
+        }
+        .base-wrapper.selected .base-icon-air {
+            background: #ffea00;
+            box-shadow: 0 0 24px #ffea00, 0 0 48px rgba(255,234,0,0.6);
+            transform: translate(-50%,-50%) scale(1.35);
+        }
+        .base-pulse-air {
+            position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%,-50%);
+            width: 40px; height: 40px;
+            border: 1.5px solid #0099ff;
+            border-radius: 50%;
+            animation: basePulse 2s ease-out infinite;
+            opacity: 0;
+            pointer-events: none;
+        }
+        @keyframes basePulse {
+            0%{transform:translate(-50%,-50%) scale(0.4);opacity:0.7;}
+            100%{transform:translate(-50%,-50%) scale(2.2);opacity:0;}
+        }
+
+        /* Enemy markers */
+        .enemy-tank { width:18px; height:18px; background:var(--danger); border:2px solid #ff8888; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); box-shadow:0 0 10px var(--danger); }
+        .enemy-soldier { width:16px; height:16px; background:var(--danger); border:2px solid #ff8888; border-radius:50%; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); box-shadow:0 0 10px var(--danger); }
+        .enemy-ship { width:26px; height:13px; background:#cc2200; border:2px solid #ff6644; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); box-shadow:0 0 10px #cc2200; border-radius:4px 4px 2px 2px; }
+        .enemy-wrapper { width:30px; height:30px; position:relative; cursor:pointer; }
+        .enemy-ring { width:30px; height:30px; border:1px solid var(--danger); border-radius:50%; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); animation:enemyPulse 1.8s ease-out infinite; opacity:0; }
+        @keyframes enemyPulse { 0%{transform:translate(-50%,-50%) scale(0.5);opacity:0.8;}100%{transform:translate(-50%,-50%) scale(1.8);opacity:0;} }
+
+        .leaflet-tooltip { background:var(--bg-dark) !important; color:var(--neon) !important; border:1px solid var(--border) !important; font-family:'Cairo',sans-serif !important; font-size:12px !important; border-radius:3px !important; box-shadow:0 0 10px rgba(0,255,157,0.2) !important; padding:4px 10px !important; }
+        .leaflet-tooltip::before { border-top-color:var(--border) !important; }
+        .leaflet-control-zoom { display:none; }
+
+        #border-btn { position:absolute; z-index:1000; bottom:16px; left:16px; background:rgba(0,30,60,0.9); border:1px solid var(--info); color:var(--info); padding:8px 16px; cursor:pointer; font-family:'Cairo',sans-serif; font-size:12px; border-radius:3px; transition:all 0.2s; }
+        #border-btn:hover { background:rgba(0,80,160,0.5); box-shadow:0 0 10px var(--info); }
+        #border-btn.active { background:rgba(0,80,160,0.6); box-shadow:0 0 15px var(--info); }
+
+        #radar-alert { position:absolute; z-index:2000; top:60px; left:50%; transform:translateX(-50%); background:rgba(180,0,0,0.92); color:#fff; padding:10px 28px; font-size:14px; border-radius:4px; border:1px solid #ff4444; box-shadow:0 0 25px rgba(255,0,0,0.5); display:none; pointer-events:none; text-align:center; font-family:'Cairo',sans-serif; }
+
+        /* End screen */
+        #end-screen { display:none; position:fixed; z-index:9999; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.88); align-items:center; justify-content:center; }
+        #end-box { background:linear-gradient(160deg,#0a0600 0%,#1a0a00 40%,#0d0500 100%); border:2px solid #c8a227; box-shadow:0 0 60px rgba(200,162,39,0.5),0 0 120px rgba(200,162,39,0.2),inset 0 0 60px rgba(200,162,39,0.05); border-radius:8px; padding:50px 60px; max-width:700px; width:90%; text-align:center; position:relative; animation:endAppear 0.8s ease; }
+        @keyframes endAppear { from{transform:scale(0.85);opacity:0;}to{transform:scale(1);opacity:1;} }
+        #end-box::before { content:''; position:absolute; top:-1px; left:10%; right:10%; height:3px; background:linear-gradient(90deg,transparent,#c8a227,#fff8dc,#c8a227,transparent); }
+        #end-box::after { content:''; position:absolute; bottom:-1px; left:10%; right:10%; height:3px; background:linear-gradient(90deg,transparent,#c8a227,#fff8dc,#c8a227,transparent); }
+        .end-emblem { font-size:52px; margin-bottom:16px; filter:drop-shadow(0 0 20px rgba(200,162,39,0.8)); }
+        .end-title { font-family:'Cairo',sans-serif; font-size:13px; color:#c8a227; letter-spacing:4px; margin-bottom:30px; text-shadow:0 0 15px rgba(200,162,39,0.6); }
+        .end-text { font-family:'Cairo',sans-serif; font-size:16px; line-height:2.2; color:#e8d9b0; text-shadow:0 0 8px rgba(200,162,39,0.3); margin-bottom:30px; }
+        .end-quote-box { background:rgba(200,162,39,0.08); border:1px solid rgba(200,162,39,0.4); border-radius:4px; padding:20px 24px; margin-top:20px; }
+        .end-quote-author { font-size:13px; color:#c8a227; margin-bottom:10px; letter-spacing:1px; }
+        .end-quote-text { font-size:17px; color:#fff8dc; line-height:2; font-weight:700; text-shadow:0 0 10px rgba(255,248,220,0.3); }
+        .end-final { margin-top:28px; font-size:20px; color:#c8a227; font-weight:700; text-shadow:0 0 20px rgba(200,162,39,0.8); letter-spacing:2px; }
+        .end-close { margin-top:28px; background:transparent; border:1px solid #c8a227; color:#c8a227; padding:10px 32px; font-family:'Cairo',sans-serif; font-size:13px; cursor:pointer; border-radius:3px; letter-spacing:2px; transition:all 0.2s; }
+        .end-close:hover { background:rgba(200,162,39,0.15); box-shadow:0 0 15px rgba(200,162,39,0.4); }
+
+        /* Make base markers always on top */
+        .leaflet-marker-pane { z-index: 650; }
+        .base-layer { z-index: 9000 !important; }
+
+        /* صواريخ مقفلة */
+        .weapon-locked {
+            opacity: 0.45 !important;
+            cursor: not-allowed !important;
+            border-color: #555 !important;
+            color: #777 !important;
+            background: rgba(50,50,50,0.3) !important;
+            pointer-events: none;
+        }
+        .weapon-unlocked {
+            opacity: 1 !important;
+            cursor: pointer !important;
+            border-color: var(--neon) !important;
+            color: var(--neon) !important;
+            pointer-events: auto;
+            animation: unlockFlash 0.6s ease 3;
+        }
+        @keyframes unlockFlash {
+            0%,100%{ background:transparent; }
+            50%{ background:rgba(0,255,157,0.25); box-shadow:0 0 20px rgba(0,255,157,0.5); }
+        }
+        .ammo-count { font-size:10px; color:#ffb700; font-weight:700; }
+
+        /* ===== صاروخ باليستي قادم — شكل واقعي ===== */
+        .ballistic-missile {
+            position: relative;
+            width: 8px; height: 28px;
+            cursor: pointer;
+            transform-origin: center center;
+            /* الاتجاه يُحسب ديناميكياً بـ JS */
+        }
+        .ballistic-body {
+            width: 8px; height: 28px;
+            background: linear-gradient(to bottom,
+                rgba(255,180,60,0.95) 0%,
+                rgba(255,120,20,0.90) 40%,
+                rgba(200,80,10,0.85) 70%,
+                rgba(120,40,0,0.70) 100%);
+            border-radius: 4px 4px 2px 2px;
+            box-shadow: 0 0 10px rgba(255,130,30,0.8), 0 0 20px rgba(255,80,0,0.4);
+            border: 1px solid rgba(255,160,60,0.6);
+            position: absolute;
+            top: 0; left: 0;
+        }
+        .ballistic-missile:hover { filter: brightness(1.4); cursor: crosshair; }
+        /* لا flame — فقط الجسم الأسطواني */
+
+        /* إنذار الصاروخ الباليستي — مختلف تماماً عن إنذارات الدبابات */
+        #ballistic-alert {
+            position: absolute; z-index: 3000;
+            top: 60px; left: 50%;
+            transform: translateX(-50%);
+            background: linear-gradient(135deg, rgba(120,40,0,0.97), rgba(200,80,0,0.97));
+            color: #fff;
+            padding: 12px 32px;
+            font-size: 15px;
+            font-weight: 700;
+            border-radius: 6px;
+            border: 2px solid #ff8800;
+            box-shadow: 0 0 40px rgba(255,100,0,0.8), 0 0 80px rgba(255,60,0,0.4);
+            display: none;
+            pointer-events: none;
+            text-align: center;
+            font-family: 'Cairo', sans-serif;
+            letter-spacing: 1px;
+            animation: ballisticFlash 0.5s ease-in-out infinite alternate;
+        }
+        @keyframes ballisticFlash {
+            from { box-shadow: 0 0 30px rgba(255,100,0,0.7); border-color: #ff8800; }
+            to   { box-shadow: 0 0 60px rgba(255,140,0,1.0); border-color: #ffcc00; }
+        }
+        #ballistic-alert .alert-icon { font-size: 22px; margin-left: 8px; }
+
+        /* نبضة الرادار برتقالية عند رصد صاروخ */
+        .radar-missile-mode { animation: radarOrange 0.8s ease-in-out infinite alternate !important; }
+        @keyframes radarOrange {
+            from { border-color: rgba(0,255,157,0.3); }
+            to   { border-color: rgba(255,140,0,0.9); }
+        }
+
+        /* مؤشر الصاروخ في الرادار — مثلث برتقالي */
+        .missile-radar-dot {
+            position: absolute;
+            width: 0; height: 0;
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            border-bottom: 9px solid #ff8800;
+            filter: drop-shadow(0 0 4px #ff8800);
+        }
+    </style>
+</head>
+<body>
+
+<div id="top-bar" class="panel">
+    <div class="title">◈ نظام القيادة والسيطرة الجوية — القوات المسلحة السعودية ◈</div>
+    <div class="status-row">
+        <div>وقت النظام: <span id="sys-time">--:--:--</span></div>
+        <div>الأهداف: <span id="e-count-top">0</span></div>
+        <div>الإحداثيات: <span id="m-coords-top">--°, --°</span></div>
+        <div class="blink" style="color:var(--neon)">● مباشر</div>
+    </div>
+</div>
+
+<div id="weapon-panel" class="panel">
+    <h2>⚡ إدارة المقذوفات</h2>
+    <div id="step-guide">
+        <div class="step" id="s1"><div class="step-num">١</div>اختر قاعدة من الخريطة</div>
+        <div class="step" id="s2"><div class="step-num">٢</div>اختر نوع الصاروخ</div>
+        <div class="step" id="s3"><div class="step-num">٣</div>اضغط على الهدف</div>
+    </div>
+    <div id="tracking-badge">🎯 نظام التتبع الذكي فعّال</div>
+    <div style="margin:10px 0;border-top:1px solid var(--border);padding-top:10px;">
+        <div style="font-size:10px;color:#555;margin-bottom:6px;letter-spacing:1px;">— أنواع الصواريخ (مرتبة: الأعلى مدى أولاً) —</div>
+
+        <button class="weapon-btn weapon-locked" id="btn-df3" onclick="selectMissile('df3')" disabled>
+            🔒 DF-3A — <span class="ammo-count" id="ammo-df3">0/5</span>
+            <span class="weapon-range">مدى: 2,800 كم | باليستي بعيد المدى — يُفعَّل بعد 3 دقائق</span>
+        </button>
+        <button class="weapon-btn weapon-locked" id="btn-df21" onclick="selectMissile('df21')" disabled>
+            🔒 DF-21C رياح الشرق — <span class="ammo-count" id="ammo-df21">0/5</span>
+            <span class="weapon-range">مدى: 1,750 كم | باليستي متوسط المدى — يُفعَّل بعد 3 دقائق</span>
+        </button>
+        <button class="weapon-btn" id="btn-thaad" onclick="selectMissile('thaad')">
+            ◉ ثاد THAAD
+            <span class="weapon-range">مدى: 400 كم | دفاع صاروخي متقدم</span>
+        </button>
+        <button class="weapon-btn" id="btn-stormshadow" onclick="selectMissile('stormshadow')">
+            ➤ ستورم شادو
+            <span class="weapon-range">مدى: 550 كم | كروز جوي شبحي</span>
+        </button>
+        <button class="weapon-btn" id="btn-gemt" onclick="selectMissile('gemt')">
+            ✦ باتريوت GEM-T
+            <span class="weapon-range">مدى: 70 كم | اعتراض عالي السرعة</span>
+        </button>
+        <button class="weapon-btn" id="btn-brimstone" onclick="selectMissile('brimstone')">
+            ➤ بريمستون
+            <span class="weapon-range">مدى: 60 كم | موجه دقيق أرضي</span>
+        </button>
+        <button class="weapon-btn" id="btn-pac3" onclick="selectMissile('pac3')">
+            ✦ باتريوت PAC-3
+            <span class="weapon-range">مدى: 40 كم | اعتراض صاروخي دقيق</span>
+        </button>
+        <button class="weapon-btn" id="btn-maverick" onclick="selectMissile('maverick')">
+            ➤ AGM-65 مافريك
+            <span class="weapon-range">مدى: 30 كم | جو-أرض تكتيكي</span>
+        </button>
+        <button class="weapon-btn" id="btn-crotale" onclick="selectMissile('crotale')">
+            ◈ كروتال / شاهين
+            <span class="weapon-range">مدى: 15 كم | دفاع جوي قصير</span>
+        </button>
+    </div>
+    <div id="selected-info" style="margin-top:8px;font-size:11px;color:#888;text-align:center;">لا يوجد صاروخ محدد</div>
+    <div style="font-size:10px;color:#444;margin-top:6px;text-align:center;">💡 اضغط Shift عند تفعيل الاشتباك لتفعيل التتبع الذكي</div>
+</div>
+
+<div id="radar-panel" class="panel">
+    <h2>📡 الرصد والإنذار المبكر</h2>
+    <div class="stat-row"><div class="label">الأهداف النشطة</div><div class="value danger" id="e-count">0</div></div>
+    <div class="stat-row"><div class="label">التهديد</div><div class="value" id="threat-level">منخفض</div></div>
+    <div class="stat-row"><div class="label">القاعدة المختارة</div><div class="value" id="sel-base-name">—</div></div>
+    <div class="stat-row"><div class="label">الصاروخ المختار</div><div class="value" id="sel-missile-name">—</div></div>
+    <div class="stat-row"><div class="label">الصواريخ المطلقة</div><div class="value" id="fired-count">0</div></div>
+    <div class="stat-row"><div class="label">الإصابات</div><div class="value" id="hit-count" style="color:var(--neon)">0</div></div>
+    <div id="mini-radar"><canvas id="radar-canvas"></canvas></div>
+</div>
+
+<div id="base-info-panel" class="panel">
+    <h3>القاعدة المحددة</h3>
+    <div id="base-info-name">—</div>
+    <div id="base-info-type">—</div>
+    <button id="base-fire-btn" onclick="enterFireMode()">🎯 تفعيل وضع الاشتباك</button>
+</div>
+
+<div id="event-log" class="panel">
+    <h3 style="font-size:11px;">سجل العمليات</h3>
+    <div id="log-container"></div>
+</div>
+
+<button id="border-btn" onclick="toggleBorder()">🗺 إظهار حدود المملكة</button>
+<div id="range-warning">⚠ الهدف خارج نطاق المدى الأقصى للصاروخ<br><span style="font-size:11px;" id="range-detail"></span></div>
+<div id="radar-alert"></div>
+<div id="ballistic-alert"><span class="alert-icon">🚀</span> <span id="ballistic-msg"></span></div>
+
+<div id="end-screen">
+    <div id="end-box">
+        <div class="end-emblem">🏰</div>
+        <div class="end-title">◈ نهاية المهمة — المملكة صامدة ◈</div>
+        <div class="end-text">لقد وصلت التهديدات إلى حدود الوطن...<br>لكن هذه الأرض ليست سهلة المنال.<br>هذه أرضٌ لا تُدنّس، وسيادةٌ لا تُنتهك.<br>هنا تقف قوةٌ لا تُكسر، وإرادةٌ لا تنحني.</div>
+        <div class="end-text" style="font-size:14px;color:#b8c9a0;">قد انتهت مهمتك...<br>لكن هذه المملكة عصيّة، لا تُنال ولا تنحني.</div>
+        <div class="end-quote-box">
+            <div class="end-quote-author">— صاحب السمو الملكي الأمير محمد بن سلمان بن عبدالعزيز آل سعود —</div>
+            <div class="end-quote-text">"لن نسمح لأحد أياً كان أن يعتدي على سيادة وطننا أو يعبث بأمنه."</div>
+        </div>
+        <div class="end-final">لم يطأ العدو أرضها...<br>ولن يطأها أبداً.</div>
+        <button class="end-close" onclick="restartGame()">🔄 جولة جديدة</button>
+    </div>
+</div>
+
+<div id="map"></div>
+
+<audio id="snd-missile" src="صاروخ.mp3" preload="auto"></audio>
+<audio id="snd-explosion" src="انفجار.mp3" preload="auto"></audio>
+<audio id="snd-destroyed" src="تم_التدمير.mp3" preload="auto"></audio>
+<audio id="snd-alert" src="انذارات.mp3" preload="auto"></audio>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// =============================================
+//   AUDIO
+// =============================================
+function playSound(id) {
+    try { const el=document.getElementById(id); if(el){el.currentTime=0;el.play().catch(()=>{});} } catch(e){}
+}
+
+// =============================================
+//   STATE
+// =============================================
+let selectedBase=null, selectedMissile=null, enemies=[], fireMode=false, trackingMode=false;
+let firedCount=0, hitCount=0, rangeCircle=null, borderLayer=null, borderVisible=false;
+let engagementActive=false, gameOver=false, wavePhase=0;
+let midWaveInterval=null, heavyWaveInterval=null;
+let defenseTriggered=false;
+
+// ═══ توقيت اللعبة ═══
+let gameStartTime = 0;       // وقت بدء اللعبة بالمللي ثانية
+let gameElapsedSec = 0;      // الوقت المنقضي بالثواني
+let phaseTimers = [];        // قائمة الـ timeouts لإلغائها عند إعادة التشغيل
+let ballisticMissiles = [];  // قائمة الصواريخ الباليستية النشطة
+let ballisticInterval = null;
+let phase3Active = false;
+let phase3Interval = null;
+
+// =============================================
+//   MAP
+// =============================================
+const map = L.map('map',{zoomControl:false,attributionControl:false}).setView([24.5,44.0],6);
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:17}).addTo(map);
+
+// Grid overlay
+const gridCanvas=document.createElement('canvas');
+gridCanvas.style.cssText='position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:500;opacity:0.07';
+document.body.appendChild(gridCanvas);
+function drawGrid(){gridCanvas.width=window.innerWidth;gridCanvas.height=window.innerHeight;const c=gridCanvas.getContext('2d');c.strokeStyle='#00ff9d';c.lineWidth=0.5;for(let x=0;x<gridCanvas.width;x+=60){c.beginPath();c.moveTo(x,0);c.lineTo(x,gridCanvas.height);c.stroke();}for(let y=0;y<gridCanvas.height;y+=60){c.beginPath();c.moveTo(0,y);c.lineTo(gridCanvas.width,y);c.stroke();}}
+drawGrid(); window.addEventListener('resize',drawGrid);
+
+// ═══════════════════════════════════════════════════════════
+//  حدود المملكة العربية السعودية — إحداثيات دقيقة جداً
+//  المصدر: Google Maps + خرائط رسمية
+//  الاتجاه: مضلع مغلق عكس عقارب الساعة
+// ═══════════════════════════════════════════════════════════
+const saudiBorder = [
+    [32.14539, 39.19922],
+    [31.99410, 39.00146],
+    [31.66040, 37.65564],
+    [31.49192, 37.01019],
+    [30.50312, 37.98798],
+    [30.31599, 37.66113],
+    [29.98824, 37.49908],
+    [29.85970, 36.75201],
+    [29.48264, 36.49658],
+    [29.17135, 36.07086],
+    [29.34866, 34.95575],
+    [28.87835, 34.82391],
+    [28.49766, 34.77997],
+    [28.15192, 34.60693],
+    [28.08410, 34.56573],
+    [27.99986, 34.49226],
+    [27.94892, 34.49638],
+    [27.90706, 34.55338],
+    [27.91495, 34.61929],
+    [27.91009, 34.73740],
+    [27.96954, 34.68384],
+    [28.01138, 34.68040],
+    [28.06956, 34.90494],
+    [28.07137, 34.96742],
+    [27.99865, 34.99763],
+    [27.92162, 35.14046],
+    [27.80264, 35.35950],
+    [27.64704, 35.48859],
+    [27.33761, 35.68359],
+    [27.12270, 35.75226],
+    [26.61309, 36.22192],
+    [26.06665, 36.54602],
+    [25.63162, 36.57349],
+    [25.29934, 36.94153],
+    [25.09555, 37.17773],
+    [24.81167, 37.19421],
+    [24.20689, 37.62817],
+    [23.70489, 38.47412],
+    [23.06962, 38.80920],
+    [22.42626, 39.07837],
+    [21.99908, 38.94653],
+    [21.41216, 39.18823],
+    [21.28937, 39.10583],
+    [20.88448, 39.34753],
+    [20.29311, 39.80347],
+    [20.12300, 40.29236],
+    [19.82356, 40.62744],
+    [18.88550, 41.14929],
+    [17.81146, 41.79749],
+    [17.51049, 42.23145],
+    [17.00951, 42.37152],
+    [16.65461, 42.73132],
+    [16.56513, 42.65717],
+    [16.40381, 42.77733],
+    [16.37878, 42.83157],
+    [16.39788, 42.95654],
+    [16.40974, 42.93869],
+    [16.43477, 42.94624],
+    [16.45123, 42.93663],
+    [16.49008, 42.94693],
+    [16.50522, 42.96204],
+    [16.51642, 42.99225],
+    [16.52102, 43.04581],
+    [16.52827, 43.06435],
+    [16.52827, 43.11996],
+    [16.57236, 43.12683],
+    [16.59145, 43.12889],
+    [16.59606, 43.14056],
+    [16.61909, 43.13988],
+    [16.63734, 43.14554],
+    [16.65478, 43.14074],
+    [16.66366, 43.13576],
+    [16.66925, 43.14331],
+    [16.67566, 43.15104],
+    [16.67435, 43.15275],
+    [16.66958, 43.15567],
+    [16.66645, 43.15704],
+    [16.66514, 43.16631],
+    [16.64721, 43.20700],
+    [16.64935, 43.21644],
+    [16.64770, 43.22330],
+    [16.64146, 43.22708],
+    [16.64228, 43.23463],
+    [16.66941, 43.23532],
+    [16.70394, 43.22639],
+    [16.70098, 43.21815],
+    [16.71216, 43.21198],
+    [16.72926, 43.22948],
+    [16.73913, 43.22227],
+    [16.74472, 43.22502],
+    [16.74209, 43.23120],
+    [16.74340, 43.23532],
+    [16.74143, 43.24871],
+    [16.74735, 43.25249],
+    [16.75228, 43.26588],
+    [16.77003, 43.25043],
+    [16.78548, 43.25867],
+    [16.79435, 43.26450],
+    [16.80881, 43.24562],
+    [16.80750, 43.24047],
+    [16.81079, 43.22948],
+    [16.83675, 43.22124],
+    [16.84792, 43.20065],
+    [16.85022, 43.19309],
+    [16.85022, 43.18108],
+    [16.86599, 43.17215],
+    [16.88143, 43.15189],
+    [16.90541, 43.13850],
+    [16.91691, 43.13747],
+    [16.91855, 43.14228],
+    [16.92446, 43.14365],
+    [16.92808, 43.15430],
+    [16.93103, 43.16391],
+    [16.93136, 43.17146],
+    [16.93859, 43.17490],
+    [16.94023, 43.18485],
+    [16.94614, 43.19447],
+    [16.95468, 43.19447],
+    [16.97307, 43.17524],
+    [16.97931, 43.18760],
+    [16.99474, 43.18039],
+    [17.00393, 43.17936],
+    [17.01214, 43.18382],
+    [17.01805, 43.17867],
+    [17.02462, 43.17902],
+    [17.02396, 43.19069],
+    [17.01608, 43.19206],
+    [17.01214, 43.19996],
+    [17.00656, 43.20305],
+    [17.01542, 43.20511],
+    [17.01969, 43.20992],
+    [17.01969, 43.21541],
+    [17.01116, 43.22330],
+    [17.01904, 43.22777],
+    [17.02166, 43.23326],
+    [17.02790, 43.23223],
+    [17.02888, 43.23841],
+    [17.02330, 43.23944],
+    [17.03249, 43.24287],
+    [17.04743, 43.23970],
+    [17.05900, 43.23249],
+    [17.07549, 43.22700],
+    [17.07877, 43.20768],
+    [17.08567, 43.19987],
+    [17.09863, 43.18520],
+    [17.08747, 43.16013],
+    [17.10453, 43.15790],
+    [17.13160, 43.15902],
+    [17.17425, 43.15241],
+    [17.18639, 43.18502],
+    [17.21033, 43.21618],
+    [17.24574, 43.19876],
+    [17.24992, 43.20356],
+    [17.25533, 43.20202],
+    [17.25927, 43.20339],
+    [17.26173, 43.20889],
+    [17.25951, 43.22039],
+    [17.26009, 43.22373],
+    [17.26853, 43.23197],
+    [17.27386, 43.24528],
+    [17.28173, 43.25798],
+    [17.29205, 43.26725],
+    [17.29041, 43.28244],
+    [17.29000, 43.28982],
+    [17.29279, 43.30261],
+    [17.29910, 43.30974],
+    [17.30098, 43.31008],
+    [17.30402, 43.31471],
+    [17.30394, 43.32407],
+    [17.30328, 43.33325],
+    [17.30394, 43.33669],
+    [17.31778, 43.33016],
+    [17.32876, 43.32596],
+    [17.35858, 43.27652],
+    [17.36252, 43.25867],
+    [17.38603, 43.22777],
+    [17.39053, 43.23695],
+    [17.40142, 43.24699],
+    [17.43222, 43.22991],
+    [17.45760, 43.25652],
+    [17.48053, 43.24081],
+    [17.48961, 43.26081],
+    [17.51630, 43.28450],
+    [17.52154, 43.29214],
+    [17.52751, 43.30270],
+    [17.53179, 43.30469],
+    [17.52770, 43.31036],
+    [17.53975, 43.33600],
+    [17.55624, 43.35475],
+    [17.54417, 43.37548],
+    [17.55525, 43.37952],
+    [17.55660, 43.39943],
+    [17.56573, 43.41956],
+    [17.56385, 43.43132],
+    [17.55002, 43.44535],
+    [17.55247, 43.45930],
+    [17.55231, 43.46453],
+    [17.54507, 43.48470],
+    [17.52686, 43.49569],
+    [17.52383, 43.50625],
+    [17.50905, 43.52028],
+    [17.51409, 43.52715],
+    [17.48331, 43.56658],
+    [17.45781, 43.58950],
+    [17.42485, 43.61898],
+    [17.39586, 43.64971],
+    [17.36620, 43.68370],
+    [17.37456, 43.78910],
+    [17.35408, 43.80936],
+    [17.33868, 43.83202],
+    [17.34146, 43.90617],
+    [17.33016, 43.96711],
+    [17.40175, 44.01175],
+    [17.39176, 44.02342],
+    [17.40388, 44.04951],
+    [17.40536, 44.06702],
+    [17.36588, 44.10049],
+    [17.36620, 44.11114],
+    [17.38308, 44.13122],
+    [17.40847, 44.13792],
+    [17.41224, 44.16504],
+    [17.41486, 44.18976],
+    [17.41371, 44.21019],
+    [17.41879, 44.23576],
+    [17.42419, 44.28778],
+    [17.43074, 44.34837],
+    [17.43320, 44.36743],
+    [17.43287, 44.40983],
+    [17.43304, 44.46733],
+    [17.40503, 44.56673],
+    [17.43336, 44.65033],
+    [17.43353, 44.95314],
+    [17.43189, 45.21835],
+    [17.33098, 45.40237],
+    [17.23853, 46.24489],
+    [17.23263, 46.37123],
+    [17.28115, 46.75026],
+    [16.94910, 46.99951],
+    [16.95041, 47.18628],
+    [17.11520, 47.46643],
+    [17.44499, 47.59758],
+    [18.15629, 48.18604],
+    [18.60851, 49.10065],
+    [18.66316, 49.57169],
+    [18.82312, 50.97244],
+    [19.00759, 52.01340],
+    [19.39407, 53.18481],
+    [19.77963, 54.33701],
+    [19.99658, 55.00580],
+    [20.28538, 55.09644],
+    [20.84084, 55.27908],
+    [21.54251, 55.51941],
+    [21.89081, 55.62962],
+    [21.98730, 55.66223],
+    [22.00513, 55.66086],
+    [22.03568, 55.64335],
+    [22.17501, 55.55065],
+    [22.21188, 55.52799],
+    [22.28560, 55.48267],
+    [22.35008, 55.44182],
+    [22.45768, 55.37144],
+    [22.61338, 55.27084],
+    [22.64665, 55.02262],
+    [22.66756, 54.86126],
+    [22.71697, 54.47296],
+    [22.76035, 54.12174],
+    [22.80404, 53.71731],
+    [22.83283, 53.47698],
+    [22.86795, 53.19340],
+    [22.89452, 52.97161],
+    [22.91539, 52.78793],
+    [22.94195, 52.58228],
+    [22.98747, 52.54177],
+    [23.11984, 52.43431],
+    [23.26343, 52.31277],
+    [23.40812, 52.19296],
+    [23.48025, 52.13356],
+    [23.62848, 52.00996],
+    [23.85193, 51.81976],
+    [23.99002, 51.70853],
+    [24.11922, 51.59708],
+    [24.12705, 51.59055],
+    [24.13892, 51.59068],
+    [24.15654, 51.59064],
+    [24.17502, 51.59068],
+    [24.21503, 51.59077],
+    [24.23726, 51.59077],
+    [24.25338, 51.59081],
+    [24.25819, 51.59075],
+    [24.25041, 51.56433],
+    [24.25103, 51.54339],
+    [24.26011, 51.52863],
+    [24.26981, 51.51833],
+    [24.27545, 51.51524],
+    [24.28139, 51.51318],
+    [24.28922, 51.50391],
+    [24.29610, 51.50013],
+    [24.30549, 51.49189],
+    [24.31175, 51.47781],
+    [24.31769, 51.47198],
+    [24.31926, 51.45412],
+    [24.32489, 51.44108],
+    [24.32583, 51.42460],
+    [24.32645, 51.40228],
+    [24.32051, 51.38443],
+    [24.30737, 51.37550],
+    [24.29767, 51.36555],
+    [24.29203, 51.35765],
+    [24.29203, 51.34083],
+    [24.29485, 51.32332],
+    [24.29548, 51.31577],
+    [24.29360, 51.30615],
+    [24.30924, 51.28658],
+    [24.32426, 51.28899],
+    [24.34366, 51.28933],
+    [24.35148, 51.29414],
+    [24.34772, 51.30032],
+    [24.35116, 51.30478],
+    [24.35867, 51.30581],
+    [24.42652, 51.32366],
+    [24.46028, 51.38065],
+    [24.47309, 51.38958],
+    [24.49496, 51.41121],
+    [24.50714, 51.41773],
+    [24.51933, 51.41464],
+    [24.52932, 51.42117],
+    [24.53463, 51.43215],
+    [24.51964, 51.43696],
+    [24.52589, 51.44485],
+    [24.53619, 51.44657],
+    [24.55431, 51.45206],
+    [24.55680, 51.47266],
+    [24.54993, 51.48331],
+    [24.56242, 51.49567],
+    [24.56992, 51.50871],
+    [24.58771, 51.48811],
+    [24.59833, 51.47713],
+    [24.58928, 51.47060],
+    [24.58771, 51.46065],
+    [24.58210, 51.45687],
+    [24.58834, 51.45138],
+    [24.60020, 51.45309],
+    [24.61175, 51.45000],
+    [24.61955, 51.44245],
+    [24.62580, 51.43524],
+    [24.61768, 51.42838],
+    [24.61706, 51.42117],
+    [24.61987, 51.41121],
+    [24.62486, 51.41258],
+    [24.62673, 51.39851],
+    [24.62236, 51.39610],
+    [24.61706, 51.39679],
+    [24.61050, 51.40194],
+    [24.60301, 51.39988],
+    [24.59271, 51.39130],
+    [24.58241, 51.38443],
+    [24.57772, 51.37997],
+    [24.57179, 51.36177],
+    [24.56274, 51.35181],
+    [24.55306, 51.34598],
+    [24.54619, 51.35181],
+    [24.53900, 51.34529],
+    [24.53307, 51.34632],
+    [24.52932, 51.33533],
+    [24.52245, 51.32710],
+    [24.50995, 51.31336],
+    [24.50847, 51.30976],
+    [24.50558, 51.30203],
+    [24.50181, 51.29100],
+    [24.50121, 51.28733],
+    [24.49433, 51.24779],
+    [24.48527, 51.20024],
+    [24.48262, 51.16573],
+    [24.47199, 51.11441],
+    [24.47199, 51.09604],
+    [24.47699, 51.07063],
+    [24.48777, 51.03733],
+    [24.50058, 50.99905],
+    [24.51855, 50.97073],
+    [24.54759, 50.92661],
+    [24.62080, 50.88730],
+    [24.69350, 50.84782],
+    [24.73374, 50.81932],
+    [24.74418, 50.81228],
+    [24.74457, 50.81155],
+    [24.74393, 50.80878],
+    [24.74379, 50.80142],
+    [24.74578, 50.79894],
+    [24.74519, 50.79816],
+    [24.74504, 50.79585],
+    [24.74406, 50.79168],
+    [24.74247, 50.78859],
+    [24.74071, 50.78864],
+    [24.73845, 50.78688],
+    [24.73568, 50.78383],
+    [24.73307, 50.77958],
+    [24.72785, 50.77675],
+    [24.72114, 50.77229],
+    [24.72013, 50.77190],
+    [24.72091, 50.76838],
+    [24.72372, 50.76799],
+    [24.72668, 50.76731],
+    [24.73124, 50.76563],
+    [24.73732, 50.76439],
+    [24.74831, 50.76327],
+    [24.75829, 50.75645],
+    [24.76304, 50.75203],
+    [24.77208, 50.75014],
+    [24.78253, 50.74795],
+    [24.79585, 50.74688],
+    [24.80653, 50.74757],
+    [24.81112, 50.74898],
+    [24.82004, 50.74632],
+    [24.82222, 50.74143],
+    [24.82912, 50.73589],
+    [24.83367, 50.73263],
+    [24.84018, 50.73014],
+    [24.84516, 50.72916],
+    [24.85252, 50.73104],
+    [24.85696, 50.73092],
+    [24.85934, 50.72898],
+    [24.86506, 50.72834],
+    [24.86997, 50.72886],
+    [24.87203, 50.72787],
+    [24.87448, 50.72396],
+    [24.87838, 50.71868],
+    [24.88208, 50.71765],
+    [24.88542, 50.71538],
+    [24.89087, 50.70474],
+    [24.89017, 50.69860],
+    [24.88908, 50.69255],
+    [24.88990, 50.68706],
+    [24.89372, 50.68336],
+    [24.89909, 50.68075],
+    [24.90648, 50.67641],
+    [24.91271, 50.67384],
+    [24.92030, 50.67427],
+    [24.92952, 50.67482],
+    [24.93517, 50.67663],
+    [24.94350, 50.67448],
+    [24.94910, 50.67152],
+    [24.95447, 50.66676],
+    [24.96089, 50.66118],
+    [24.97030, 50.65766],
+    [24.97789, 50.65371],
+    [25.03708, 50.61213],
+    [25.07052, 50.58020],
+    [25.06632, 50.57470],
+    [25.05124, 50.57487],
+    [25.03584, 50.58397],
+    [25.03351, 50.57814],
+    [25.03786, 50.56852],
+    [25.04875, 50.56149],
+    [25.06119, 50.56921],
+    [25.06585, 50.57127],
+    [25.07891, 50.56234],
+    [25.11296, 50.55685],
+    [25.14140, 50.54827],
+    [25.14591, 50.55634],
+    [25.16005, 50.56080],
+    [25.18801, 50.55719],
+    [25.20929, 50.53831],
+    [25.24749, 50.52029],
+    [25.28863, 50.53419],
+    [25.31439, 50.52887],
+    [25.37272, 50.50604],
+    [25.41025, 50.49282],
+    [25.44157, 50.45317],
+    [25.51193, 50.38433],
+    [25.56257, 50.34176],
+    [25.66690, 50.26382],
+    [25.73496, 50.22881],
+    [25.90556, 50.10933],
+    [25.92532, 50.13817],
+    [25.95990, 50.12581],
+    [25.98829, 50.10452],
+    [26.01421, 50.03998],
+    [26.00064, 50.01526],
+    [26.03581, 50.00633],
+    [26.08330, 50.01045],
+    [26.10550, 50.00084],
+    [26.13941, 50.00908],
+    [26.18255, 50.02899],
+    [26.18748, 50.04410],
+    [26.16900, 50.06401],
+    [26.12647, 50.07225],
+    [26.10489, 50.09491],
+    [26.05370, 50.11963],
+    [26.03087, 50.12718],
+    [26.02840, 50.15602],
+    [26.04938, 50.16151],
+    [26.08392, 50.16357],
+    [26.12832, 50.17456],
+    [26.15051, 50.16838],
+    [26.16592, 50.18005],
+    [26.15914, 50.18967],
+    [26.15236, 50.20821],
+    [26.17085, 50.21988],
+    [26.20720, 50.22743],
+    [26.27002, 50.22194],
+    [26.33404, 50.23361],
+    [26.36911, 50.23979],
+    [26.41770, 50.21988],
+    [26.40786, 50.19173],
+    [26.42016, 50.19310],
+    [26.42754, 50.20134],
+    [26.43615, 50.21095],
+    [26.44414, 50.20271],
+    [26.45766, 50.21439],
+    [26.49454, 50.22400],
+    [26.51851, 50.19241],
+    [26.48901, 50.17937],
+    [26.47303, 50.16357],
+    [26.46074, 50.14435],
+    [26.48532, 50.13885],
+    [26.50069, 50.13611],
+    [26.50376, 50.11208],
+    [26.48594, 50.10658],
+    [26.48778, 50.09010],
+    [26.47918, 50.07912],
+    [26.49270, 50.06058],
+    [26.51974, 50.05028],
+    [26.53817, 50.04410],
+    [26.53509, 50.06813],
+    [26.55905, 50.10178],
+    [26.59528, 50.09560],
+    [26.59835, 50.03998],
+    [26.61677, 50.01938],
+    [26.65789, 50.02899],
+    [26.67078, 50.07774],
+    [26.66035, 50.10178],
+    [26.63273, 50.14023],
+    [26.62475, 50.16907],
+    [26.65482, 50.16495],
+    [26.69839, 50.10590],
+    [26.76952, 50.04478],
+    [26.84797, 49.95689],
+    [26.87798, 49.85939],
+    [26.93615, 49.73991],
+    [26.99001, 49.68086],
+    [27.02182, 49.69391],
+    [27.03222, 49.69734],
+    [27.03589, 49.64859],
+    [27.06035, 49.62868],
+    [27.06279, 49.66232],
+    [27.07013, 49.69872],
+    [27.08053, 49.71519],
+    [27.09642, 49.70558],
+    [27.10253, 49.68567],
+    [27.07686, 49.64035],
+    [27.06830, 49.61700],
+    [27.09581, 49.59160],
+    [27.13859, 49.60808],
+    [27.19601, 49.62868],
+    [27.29979, 49.70009],
+    [27.35835, 49.49066],
+    [27.29857, 49.44260],
+    [27.29857, 49.39728],
+    [27.31565, 49.32175],
+    [27.36201, 49.32175],
+    [27.39616, 49.32449],
+    [27.40835, 49.29016],
+    [27.43517, 49.32861],
+    [27.49731, 49.30252],
+    [27.53263, 49.27368],
+    [27.57403, 49.22562],
+    [27.58133, 49.13910],
+    [27.59593, 49.04572],
+    [27.64582, 49.06769],
+    [27.84879, 48.87817],
+    [27.94528, 48.76076],
+    [27.97864, 48.74771],
+    [27.98955, 48.79097],
+    [28.00289, 48.78136],
+    [28.05017, 48.66325],
+    [28.17674, 48.62000],
+    [28.19914, 48.62755],
+    [28.30922, 48.53348],
+    [28.40227, 48.54996],
+    [28.49645, 48.49846],
+    [28.52542, 48.44833],
+    [28.53416, 48.43151],
+    [28.53175, 48.13179],
+    [28.52692, 47.80426],
+    [28.52542, 47.70470],
+    [28.54291, 47.70882],
+    [28.60140, 47.65182],
+    [28.63154, 47.63672],
+    [28.65324, 47.60616],
+    [28.70956, 47.59483],
+    [28.75893, 47.60136],
+    [28.83625, 47.58762],
+    [28.89849, 47.54230],
+    [28.96730, 47.49630],
+    [29.00003, 47.46780],
+    [29.03996, 47.12070],
+    [29.09158, 46.64864],
+    [29.10080, 46.56169],
+    [29.10035, 46.54718],
+    [29.09233, 46.52135],
+    [29.08078, 46.48642],
+    [29.07620, 46.47200],
+    [29.06881, 46.44925],
+    [29.06131, 46.42629],
+    [29.06378, 46.39801],
+    [29.06952, 46.33102],
+    [29.07440, 46.27398],
+    [29.08021, 46.20691],
+    [29.09488, 46.03220],
+    [29.11258, 45.81247],
+    [29.13207, 45.57386],
+    [29.13957, 45.49421],
+    [29.15966, 45.23380],
+    [29.20012, 44.72122],
+    [29.53284, 44.26804],
+    [29.83111, 43.86978],
+    [30.77016, 42.56653],
+    [31.07646, 42.11334],
+    [31.44507, 41.30859],
+    [31.77021, 40.73181],
+    [31.95449, 40.43243],
+    [32.07327, 39.67987]
+];// isInGulf, isInRedSea, isOnSea — defined in SPAWN_VARIANTS section above
+
+function isInsideSaudi(lat, lng) {
+    // ══ حدود إحاطة خارجية — رفض سريع ══
+    if (lat > 32.3 || lat < 16.5 || lng < 34.6 || lng > 55.3) return false;
+
+    // ══ استثناءات صريحة: مناطق دول أخرى داخل نطاق الإحاطة ══
+
+    // قطر: شبه جزيرة شرق الخليج (24.5–26.2°N, 50.75–51.65°E)
+    if (lat >= 24.5 && lat <= 26.2 && lng >= 50.75 && lng <= 51.65) return false;
+
+    // البحرين: جزيرة (25.8–26.4°N, 50.3–50.7°E)
+    if (lat >= 25.8 && lat <= 26.4 && lng >= 50.3 && lng <= 50.7) return false;
+
+    // الإمارات: (23.0–26.1°N, 51.6–55.8°E) — غرب خط 55.1 فقط للسعودية
+    if (lng >= 55.12 && lat >= 22.5 && lat <= 26.2) return false;
+    if (lng >= 54.0 && lat >= 23.8 && lat <= 25.0) return false;  // المنطقة الساحلية للإمارات
+
+    // عُمان: شرق وجنوب شرق (lat < 22.8 AND lng > 55.0)
+    if (lat <= 22.7 && lng >= 55.0) return false;
+
+    // اليمن: جنوب الحدود السعودية-اليمنية
+    // الحد اليمني يبدأ عند 16.97°N على الساحل الغربي وينحدر شرقاً
+    if (lat < 16.55) return false;  // جنوب خط جازان — يمن
+
+    // ══ خوارزمية النقطة داخل المضلع ══
+    let inside = false;
+    for (let i = 0, j = saudiBorder.length - 1; i < saudiBorder.length; j = i++) {
+        const xi = saudiBorder[i][0], yi = saudiBorder[i][1];
+        const xj = saudiBorder[j][0], yj = saudiBorder[j][1];
+        const intersect = ((yi > lng) !== (yj > lng)) &&
+            (lat < (xj - xi) * (lng - yi) / (yj - yi) + xi);
+        if (intersect) inside = !inside;
+    }
+    return inside;
+}
+
+// =============================================
+//   MILITARY BASES
+// =============================================
+const militaryBases = [
+    {id:'khamis',   name:"قاعدة الملك خالد الجوية",      coords:[18.3069,42.8092], detail:"خميس مشيط — عسير"},
+    {id:'dhahran',  name:"قاعدة الملك عبدالعزيز الجوية", coords:[26.2653,50.1519], detail:"الظهران — المنطقة الشرقية"},
+    {id:'tabuk',    name:"قاعدة الملك فيصل الجوية",      coords:[28.3972,36.5789], detail:"تبوك — الشمالية الغربية"},
+    {id:'sultan',   name:"قاعدة الأمير سلطان الجوية",    coords:[24.0625,47.5803], detail:"السيح — الخرج"},
+    {id:'taif',     name:"قاعدة الملك فهد الجوية",       coords:[21.4834,40.5415], detail:"الطائف — المنطقة الغربية"},
+    {id:'jeddah',   name:"قاعدة الملك عبدالله الجوية",   coords:[21.6794,39.1567], detail:"جدة — المنطقة الغربية"},
+    {id:'hafr',     name:"قاعدة الملك سعود الجوية",      coords:[27.9008,45.5283], detail:"حفر الباطن — الشمالية الشرقية"},
+    {id:'riyadh',   name:"قاعدة الملك سلمان الجوية",     coords:[24.7097,46.7253], detail:"الرياض — المنطقة الوسطى"}
+];
+
+// =============================================
+//   MISSILES — مرتبة من الأعلى مدى إلى الأدنى
+// =============================================
+const MISSILES = {
+    df3:         {name:'DF-3A',                range:2800,color:'#ff2200',radius:30000,speed:4800, ammo:5,  locked:true},
+    df21:        {name:'DF-21C رياح الشرق',   range:1750,color:'#ff4400',radius:25000,speed:5500, ammo:5,  locked:true},
+    thaad:       {name:'ثاد THAAD',            range:400, color:'#aa66ff',radius:15000,speed:4000, ammo:999,locked:false},
+    stormshadow: {name:'ستورم شادو',           range:550, color:'#ff7700',radius:10000,speed:2500, ammo:999,locked:false},
+    gemt:        {name:'باتريوت GEM-T',        range:70,  color:'#00aaff',radius:6000, speed:4500, ammo:999,locked:false},
+    brimstone:   {name:'بريمستون',             range:60,  color:'#ffaa00',radius:5000, speed:2800, ammo:999,locked:false},
+    pac3:        {name:'باتريوت PAC-3',        range:40,  color:'#00ccff',radius:4000, speed:4000, ammo:999,locked:false},
+    maverick:    {name:'AGM-65 مافريك',        range:30,  color:'#ffcc00',radius:4000, speed:2000, ammo:999,locked:false},
+    crotale:     {name:'كروتال / شاهين',       range:15,  color:'#88ff44',radius:3000, speed:2200, ammo:999,locked:false},
+};
+
+// =============================================
+//   BASE MARKERS — high z-index, no always-visible label
+// =============================================
+const baseMarkersMap = {};
+
+// Create a separate pane for bases so they're always on top
+map.createPane('basesPane');
+map.getPane('basesPane').style.zIndex = 700;
+
+militaryBases.forEach(base => {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'base-wrapper';
+
+    const pulse = document.createElement('div');
+    pulse.className = 'base-pulse-air';
+
+    const icon = document.createElement('div');
+    icon.className = 'base-icon-air';
+
+    wrapper.appendChild(pulse);
+    wrapper.appendChild(icon);
+
+    const marker = L.marker(base.coords, {
+        icon: L.divIcon({html: wrapper, className:'', iconSize:[44,44], iconAnchor:[22,22]}),
+        pane: 'basesPane'
+    }).addTo(map);
+
+    // Tooltip shown on hover AND keeps visible on click (sticky)
+    marker.bindTooltip(
+        `<b style="font-size:13px;">✈ ${base.name}</b><br><span style="color:#888;font-size:11px;">${base.detail}</span>`,
+        {direction:'top', offset:[0,-24], sticky:false}
+    );
+
+    marker.on('click', (e) => {
+        L.DomEvent.stopPropagation(e);
+        selectBase(base, marker, wrapper);
+    });
+
+    base.marker = marker;
+    base.markerEl = wrapper;
+    base.iconEl = icon;
+    baseMarkersMap[base.id] = base;
+});
+
+// =============================================
+//   مناطق المملكة العربية السعودية (13 منطقة إدارية)
+//   مركز كل منطقة بدقة جغرافية
+// =============================================
+map.createPane('regionPane');
+map.getPane('regionPane').style.zIndex = 450;
+map.getPane('regionPane').style.pointerEvents = 'none';
+
+const saudiRegions = [
+    {name:'منطقة الرياض',            lat:23.60, lng:46.00, size:13},
+    {name:'المنطقة الشرقية',          lat:25.40, lng:49.20, size:12},
+    {name:'منطقة مكة المكرمة',       lat:21.00, lng:40.80, size:12},
+    {name:'منطقة المدينة المنورة',    lat:25.20, lng:38.80, size:11},
+    {name:'منطقة تبوك',              lat:28.70, lng:37.20, size:12},
+    {name:'منطقة حائل',              lat:27.70, lng:41.80, size:12},
+    {name:'منطقة الحدود الشمالية',   lat:31.10, lng:41.30, size:11},
+    {name:'منطقة الجوف',             lat:29.80, lng:39.60, size:12},
+    {name:'منطقة القصيم',            lat:26.20, lng:43.50, size:12},
+    {name:'منطقة عسير',              lat:18.80, lng:42.50, size:12},
+    {name:'منطقة جازان',             lat:17.00, lng:42.90, size:11},
+    {name:'منطقة نجران',             lat:18.00, lng:44.80, size:12},
+    {name:'منطقة الباحة',            lat:20.00, lng:41.50, size:10},
+];
+
+saudiRegions.forEach(r => {
+    L.marker([r.lat, r.lng], {
+        icon: L.divIcon({
+            html: `<div style="color:rgba(0,255,157,0.80);font-family:Cairo,sans-serif;font-size:${r.size}px;font-weight:700;white-space:nowrap;letter-spacing:0.5px;text-shadow:0 0 6px rgba(0,0,0,0.9),0 0 12px rgba(0,0,0,0.7);">${r.name}</div>`,
+            className: '',
+            iconAnchor: [0, 0]
+        }),
+        pane: 'regionPane',
+        interactive: false
+    }).addTo(map);
+});
+
+// =============================================
+//   أسماء الدول المجاورة — مركزها الجغرافي الحقيقي
+// =============================================
+map.createPane('countryPane');
+map.getPane('countryPane').style.zIndex = 400;
+map.getPane('countryPane').style.pointerEvents = 'none';
+
+const neighborCountries = [
+    // دول الجوار البري
+    {name:'العراق',                  lat:31.8,  lng:44.0,  size:16},
+    {name:'الأردن',                  lat:31.2,  lng:36.5,  size:15},
+    {name:'إيران',                   lat:32.5,  lng:54.0,  size:16},
+    {name:'الكويت',                  lat:29.40, lng:47.50, size:12},
+    {name:'قطر',                     lat:25.20, lng:51.20, size:11},
+    {name:'البحرين',                 lat:26.10, lng:50.57, size:10},
+    {name:'الإمارات\nالعربية المتحدة',lat:23.50, lng:54.00, size:13},
+    {name:'سلطنة عُمان',             lat:21.50, lng:58.50, size:14},
+    {name:'اليمن',                   lat:15.50, lng:47.50, size:16},
+    // دول بعيدة قرب الحدود
+    {name:'مصر',                     lat:26.50, lng:30.50, size:15},
+    {name:'سوريا',                   lat:34.80, lng:38.50, size:13},
+    {name:'إسرائيل',                 lat:31.50, lng:35.00, size:11},
+    {name:'إريتريا',                 lat:15.30, lng:38.90, size:11},
+    // مسطحات مائية
+    {name:'البحر الأحمر',            lat:22.00, lng:37.00, size:12},
+    {name:'الخليج العربي',           lat:27.00, lng:51.50, size:12},
+    {name:'خليج عُمان',              lat:24.50, lng:58.00, size:11},
+    {name:'بحر العرب',               lat:17.00, lng:61.00, size:12},
+];
+
+neighborCountries.forEach(c => {
+    L.marker([c.lat, c.lng], {
+        icon: L.divIcon({
+            html: `<div style="color:rgba(255,240,180,0.88);font-family:Cairo,sans-serif;font-size:${c.size}px;font-weight:700;white-space:nowrap;letter-spacing:0.8px;text-shadow:1px 1px 4px rgba(0,0,0,0.95),0 0 8px rgba(0,0,0,0.8);text-align:center;">${c.name}</div>`,
+            className:'',
+            iconAnchor:[0,0]
+        }),
+        pane:'countryPane',
+        interactive:false
+    }).addTo(map);
+});
+
+// =============================================
+//   BASE SELECTION
+// =============================================
+function selectBase(base, marker, wrapper) {
+    if (selectedBase) selectedBase.markerEl.classList.remove('selected');
+    selectedBase = base;
+    wrapper.classList.add('selected');
+
+    document.getElementById('base-info-panel').style.display = 'block';
+    document.getElementById('base-info-name').innerText = base.name;
+    document.getElementById('base-info-type').innerText = base.detail;
+    document.getElementById('sel-base-name').innerText = base.name.split(' ').slice(-2).join(' ');
+    document.getElementById('base-fire-btn').style.display = selectedMissile ? 'inline-block' : 'none';
+
+    if (rangeCircle) map.removeLayer(rangeCircle);
+    if (selectedMissile) drawRangeCircle();
+    updateSteps();
+    log(`تم تحديد: ${base.name}`, 'info');
+}
+
+function drawRangeCircle() {
+    if (rangeCircle) map.removeLayer(rangeCircle);
+    if (!selectedBase || !selectedMissile) return;
+    const m = MISSILES[selectedMissile];
+    rangeCircle = L.circle(selectedBase.coords, {radius:m.range*1000,color:m.color,fillColor:m.color,fillOpacity:0.04,weight:1,dashArray:'6,6'}).addTo(map);
+}
+
+// =============================================
+//   MISSILE SELECTION
+// =============================================
+function selectMissile(type) {
+    const m = MISSILES[type];
+    // تحقق من القفل
+    if (m.locked) {
+        log('🔒 هذا الصاروخ مقفل — يُفعَّل بعد 3 دقائق', 'fail');
+        return;
+    }
+    // تحقق من الذخيرة
+    if (m.ammoLeft !== undefined && m.ammoLeft <= 0) {
+        log(`⚠ نفدت ذخيرة ${m.name}!`, 'fail');
+        return;
+    }
+    selectedMissile = type;
+    document.querySelectorAll('.weapon-btn').forEach(b=>b.classList.remove('active'));
+    const btn = document.getElementById('btn-'+type);
+    if(btn) btn.classList.add('active');
+    document.getElementById('sel-missile-name').innerText = m.name;
+    document.getElementById('selected-info').innerText = `${m.name} — مدى ${m.range} كم`;
+    document.getElementById('selected-info').style.color = m.color;
+    if (selectedBase) { document.getElementById('base-fire-btn').style.display='inline-block'; drawRangeCircle(); }
+    updateSteps();
+}
+
+// =============================================
+//   FIRE MODE
+// =============================================
+document.addEventListener('keydown', e => {
+    if (e.key==='Shift'&&fireMode) { trackingMode=true; document.getElementById('tracking-badge').style.display='block'; document.getElementById('base-fire-btn').innerText='🎯 انقر الهدف (تتبع ذكي)...'; }
+});
+document.addEventListener('keyup', e => {
+    if (e.key==='Shift'&&!fireMode) { trackingMode=false; document.getElementById('tracking-badge').style.display='none'; }
+});
+
+function enterFireMode() {
+    if (!selectedBase||!selectedMissile) return;
+    if (engagementActive) { log('نظام الاشتباك فعّال بالفعل','info'); return; }
+    engagementActive=true; fireMode=true; trackingMode=false;
+    document.getElementById('base-fire-btn').innerText='🎯 انقر على الهدف...';
+    document.getElementById('base-fire-btn').style.background='#ff6000';
+    log('وضع الاشتباك مفعّل — انقر على الهدف','info');
+}
+
+map.on('click', e => {
+    if (!fireMode) return;
+    if (!selectedBase||!selectedMissile) { log('الرجاء اختيار قاعدة وصاروخ أولاً','fail'); return; }
+    const target=e.latlng;
+    const dist=map.distance(selectedBase.coords,[target.lat,target.lng]);
+    const maxRange=MISSILES[selectedMissile].range*1000;
+    firedCount++; document.getElementById('fired-count').innerText=firedCount;
+    launchMissile(selectedBase.coords,{lat:target.lat,lng:target.lng},dist,maxRange,null,trackingMode);
+    fireMode=false; engagementActive=false; trackingMode=false;
+    document.getElementById('tracking-badge').style.display='none';
+    document.getElementById('base-fire-btn').innerText='🎯 تفعيل وضع الاشتباك';
+    document.getElementById('base-fire-btn').style.background='';
+});
+
+// =============================================
+//   MISSILE ANIMATION
+// =============================================
+function launchMissile(startCoords, endLatLng, totalDist, maxRange, targetEnemy, useTracking) {
+    if (totalDist>maxRange) {
+        document.getElementById('range-detail').innerText=`المسافة: ${Math.round(totalDist/1000)} كم | المدى: ${MISSILES[selectedMissile].range} كم`;
+        const w=document.getElementById('range-warning'); w.style.display='block'; setTimeout(()=>w.style.display='none',2500);
+        log(`⚠ صاروخ خارج المدى!`,'fail'); return;
+    }
+    const m=MISSILES[selectedMissile];
+    playSound('snd-missile');
+    // خصم الذخيرة للصواريخ المحدودة
+    if (m.ammoLeft !== undefined && m.ammoLeft > 0) {
+        m.ammoLeft--;
+        const ammoEl = document.getElementById('ammo-'+selectedMissile);
+        if (ammoEl) ammoEl.innerText = `${m.ammoLeft}/5`;
+        if (m.ammoLeft === 0) {
+            log(`⚠ نفدت ذخيرة ${m.name}!`, 'fail');
+            document.getElementById('btn-'+selectedMissile)?.classList.add('weapon-locked');
+        }
+    }
+    const dur=Math.min(3000,Math.max(1200,totalDist/m.speed*1000));
+    const st=performance.now();
+    const line=L.polyline([startCoords,startCoords],{color:m.color,weight:1.5,dashArray:'4,4',opacity:0.9}).addTo(map);
+    let end={lat:endLatLng.lat,lng:endLatLng.lng};
+    const hEl=document.createElement('div');
+    hEl.style.cssText=`width:8px;height:8px;background:${m.color};border-radius:50%;box-shadow:0 0 10px ${m.color},0 0 20px ${m.color}`;
+    const hM=L.marker(startCoords,{icon:L.divIcon({html:hEl,className:'',iconSize:[8,8],iconAnchor:[4,4]})}).addTo(map);
+    function anim(now){
+        let p=Math.min(1,(now-st)/dur);
+        if(useTracking&&targetEnemy&&targetEnemy.alive) end={lat:targetEnemy.lat,lng:targetEnemy.lng};
+        const lat=startCoords[0]+(end.lat-startCoords[0])*p;
+        const lng=startCoords[1]+(end.lng-startCoords[1])*p;
+        line.setLatLngs([startCoords,[lat,lng]]); hM.setLatLng([lat,lng]);
+        if(p<1){requestAnimationFrame(anim);}else{map.removeLayer(line);map.removeLayer(hM);createExplosion([end.lat,end.lng],false,m);}
+    }
+    requestAnimationFrame(anim);
+}
+
+function launchMissileAtEnemy(startCoords, enemy) {
+    if (!selectedMissile) return;
+    // لا يمكن استهداف سفينة غير مرصودة بعد
+    if (enemy.hidden) { log('⚠ الهدف خارج نطاق الرصد','fail'); return; }
+    const m=MISSILES[selectedMissile];
+    const dist=map.distance(startCoords,[enemy.lat,enemy.lng]);
+    if (dist>m.range*1000) { log(`⚠ هدف خارج المدى!`,'fail'); return; }
+    playSound('snd-missile');
+    firedCount++; document.getElementById('fired-count').innerText=firedCount;
+    const dur=Math.min(3000,Math.max(1200,dist/m.speed*1000));
+    const st=performance.now();
+    // Snapshot target position at fire time
+    const snapLat=enemy.lat, snapLng=enemy.lng;
+    const line=L.polyline([startCoords,startCoords],{color:m.color,weight:1.5,dashArray:'4,4',opacity:0.9}).addTo(map);
+    const hEl=document.createElement('div');
+    hEl.style.cssText=`width:8px;height:8px;background:${m.color};border-radius:50%;box-shadow:0 0 10px ${m.color},0 0 20px ${m.color}`;
+    const hM=L.marker(startCoords,{icon:L.divIcon({html:hEl,className:'',iconSize:[8,8],iconAnchor:[4,4]})}).addTo(map);
+    function anim(now){
+        let p=Math.min(1,(now-st)/dur);
+        // Always aim at current enemy position (it moves)
+        const tLat=enemy.alive?enemy.lat:snapLat;
+        const tLng=enemy.alive?enemy.lng:snapLng;
+        const lat=startCoords[0]+(tLat-startCoords[0])*p;
+        const lng=startCoords[1]+(tLng-startCoords[1])*p;
+        line.setLatLngs([startCoords,[lat,lng]]); hM.setLatLng([lat,lng]);
+        if(p<1){requestAnimationFrame(anim);}else{
+            map.removeLayer(line); map.removeLayer(hM);
+            createExplosion([tLat,tLng],false,m);
+            // Forcibly destroy enemy on hit
+            if(enemy.alive){
+                enemy.alive=false;
+                if(enemy.marker) map.removeLayer(enemy.marker);
+                enemies=enemies.filter(e=>e!==enemy);
+                hitCount++; document.getElementById('hit-count').innerText=hitCount;
+                playSound('snd-destroyed');
+                log(`✓ تم تدمير هدف (${enemy.faction==='iran'?'إيران':'اليمن'})`,'success');
+            }
+        }
+    }
+    requestAnimationFrame(anim);
+}
+
+function launchTrackingMissile(startCoords, enemy) {
+    if (!selectedMissile) return;
+    const m=MISSILES[selectedMissile];
+    const dist=map.distance(startCoords,[enemy.lat,enemy.lng]);
+    playSound('snd-missile');
+    firedCount++; document.getElementById('fired-count').innerText=firedCount;
+    const dur=Math.min(4000,Math.max(1500,dist/m.speed*1000));
+    const st=performance.now();
+    const line=L.polyline([startCoords,startCoords],{color:m.color,weight:2,dashArray:'3,3',opacity:1}).addTo(map);
+    const hEl=document.createElement('div');
+    hEl.style.cssText=`width:10px;height:10px;background:${m.color};border-radius:50%;box-shadow:0 0 14px ${m.color},0 0 28px ${m.color}`;
+    const hM=L.marker(startCoords,{icon:L.divIcon({html:hEl,className:'',iconSize:[10,10],iconAnchor:[5,5]})}).addTo(map);
+    let cLat=startCoords[0], cLng=startCoords[1];
+    function anim(now){
+        const p=Math.min(1,(now-st)/dur);
+        const tLat=enemy.alive?enemy.lat:cLat;
+        const tLng=enemy.alive?enemy.lng:cLng;
+        cLat=startCoords[0]+(tLat-startCoords[0])*p;
+        cLng=startCoords[1]+(tLng-startCoords[1])*p;
+        line.setLatLngs([startCoords,[cLat,cLng]]); hM.setLatLng([cLat,cLng]);
+        if(p<1){requestAnimationFrame(anim);}else{
+            map.removeLayer(line); map.removeLayer(hM);
+            createExplosion([cLat,cLng],false,m);
+            if(enemy.alive){
+                enemy.alive=false;
+                if(enemy.marker) map.removeLayer(enemy.marker);
+                enemies=enemies.filter(e=>e!==enemy);
+                hitCount++; document.getElementById('hit-count').innerText=hitCount;
+                playSound('snd-destroyed');
+                log(`✓ هدف محايَد بالتتبع الذكي`,'success');
+            }
+        }
+    }
+    requestAnimationFrame(anim);
+}
+
+// =============================================
+//   EXPLOSION — enemy disappears after blast
+// =============================================
+function createExplosion(coords, failed, m) {
+    playSound('snd-explosion');
+    const color=failed?'#888':m.color;
+    const radius=failed?4000:m.radius;
+
+    const wave=L.circle(coords,{radius:radius*0.25,color,fillColor:color,fillOpacity:0.8,weight:2}).addTo(map);
+    const wave2=L.circle(coords,{radius,color,fillColor:color,fillOpacity:0.18,weight:1,dashArray:'4,4'}).addTo(map);
+
+    let step=0;
+    const ani=setInterval(()=>{
+        step++;
+        wave.setStyle({fillOpacity:Math.max(0,0.8-step*0.08),radius:radius*0.25*(1+step*0.1)});
+        wave2.setStyle({fillOpacity:Math.max(0,0.18-step*0.018)});
+        if(step>10){clearInterval(ani);map.removeLayer(wave);map.removeLayer(wave2);}
+    },80);
+
+    if (!failed) {
+        // Destroy all enemies in blast radius and remove from map immediately
+        const toDestroy=enemies.filter(en=>en.alive&&!en.hidden&&map.distance(coords,[en.lat,en.lng])<radius);
+        toDestroy.forEach(en=>{
+            en.alive=false;
+            setTimeout(()=>{
+                if(en.marker){map.removeLayer(en.marker);en.marker=null;}
+                enemies=enemies.filter(e=>e!==en);
+                hitCount++; document.getElementById('hit-count').innerText=hitCount;
+                playSound('snd-destroyed');
+            },200+Math.random()*300);
+        });
+        log(`✓ انفجار في (${coords[0].toFixed(2)},${coords[1].toFixed(2)})`,'success');
+    } else {
+        log(`✗ الصاروخ سقط خارج المدى`,'fail');
+    }
+}
+
+// =============================================
+//   ENEMY CLASS
+//   iran_sea: spawns as ship in Gulf → moves to Saudi coast → stops → disembarks soldiers
+//   iran_iraq: spawns as soldier/tank in Iraq → moves to NE Saudi border
+//   yemen: spawns as soldier/tank in Yemen → moves to S Saudi border
+// =============================================
+
+// ═══════════════════════════════════════════════════════════
+//  مسار السفن الإيرانية — إحداثيات بحر الخليج الحقيقية فقط
+//  هذه النقاط بحر مؤكد 100% داخل الخليج العربي
+// ═══════════════════════════════════════════════════════════
+
+// مسار السفن: تبدأ من الشمال الشرقي (عمق الخليج قرب الكويت/إيران)
+// وتتحرك جنوباً غرباً نحو الساحل السعودي
+const GULF_SEA_PATH = [
+    [29.91685, 50.17456],
+    [28.93125, 48.18604],
+    [28.41073, 48.53760],
+    [27.75161, 48.91113],
+    [27.60567, 48.93860],
+    [27.56185, 49.22974],
+    [27.48878, 49.32312],
+    [27.34737, 49.38354],
+    [27.33761, 49.61426],
+    [27.33761, 49.72412],
+    [27.23021, 49.66370],
+    [27.12270, 49.64172],
+    [27.06891, 49.72412],
+    [26.98572, 49.71863],
+    [26.90738, 49.84497],
+    [26.87308, 49.97131],
+    [26.77014, 50.05920],
+    [26.68182, 50.17456],
+    [26.57379, 50.13062],
+    [26.50007, 50.14709],
+    [26.49516, 50.22949],
+    [26.36726, 50.28442],
+    [26.28356, 50.25696],
+    [26.09625, 50.22949],
+    [25.99755, 50.19653],
+    [25.82462, 50.20203],
+    [25.73558, 50.27344],
+    [25.62667, 50.33386],
+    [25.78505, 50.51514],
+    [25.92347, 50.42725],
+    [26.08639, 50.40527],
+    [26.28356, 50.42175],
+    [26.31311, 50.51514],
+    [26.37711, 50.60852],
+    [26.35250, 50.70190],
+    [26.21952, 50.71289],
+    [26.08145, 50.70190],
+    [25.91359, 50.65796],
+    [25.80484, 50.63599],
+    [25.66628, 50.53711],
+    [25.51270, 50.44373],
+    [25.46311, 50.52612],
+    [25.81967, 50.80627],
+    [26.25401, 51.21826],
+    [25.69104, 51.99829],
+    [26.59835, 53.88794],
+    [27.17647, 52.86621],
+    [27.62514, 52.31689],
+    [27.74188, 52.04224],
+    [28.07198, 51.24023],
+    [28.74840, 51.02051],
+    [29.13297, 50.64697],
+    [29.45873, 50.58105]
+];
+
+// نقاط التوليد: بداية المسار (شمال الخليج — بحر مؤكد)
+// نختار من النقاط ذات الإحداثيات الشمالية الشرقية (بعيدة عن الساحل)
+const SHIP_SPAWN_INDICES = [53, 54, 51, 52, 50]; // آخر نقاط المصفوفة = شمال الخليج
+
+// نقاط الرسو الساحلية السعودية — آخر نقاط في المسار قبل الوصول للشاطئ
+// نختار النقاط التي بين خط 25.4-26.5°N و50.1-50.8°E (ساحل شرق السعودية)
+const COAST_LANDING_INDICES = [17, 18, 19, 20, 21, 27, 28]; // نقاط الساحل السعودي في المسار
+
+// نقاط تفريغ الجنود — على الشاطئ السعودي مباشرة (غرب نقطة توقف السفينة قليلاً)
+const DISEMBARK_TARGETS = [
+    {lat:26.20, lng:50.05},  // شمال الدمام الساحل
+    {lat:26.40, lng:50.00},  // الجبيل الساحل
+    {lat:27.00, lng:49.55},  // الخفجي الساحل
+    {lat:26.65, lng:49.85},  // قريب القطيف ساحل
+    {lat:25.85, lng:50.45},  // ساحل جنوبي
+];
+
+// دالة التحقق من أن النقطة ضمن مسار بحر الخليج المعتمد
+function isPointInGulfPath(lat, lng) {
+    // التحقق ببساطة: هل تقع داخل حدود مضلع الخليج المرسوم؟
+    // نستخدم bounding box أولاً
+    if (lat < 24.5 || lat > 30.5) return false;
+    if (lng < 47.5 || lng > 55.0) return false;
+    // ثم نتحقق أن ليست في اليابسة السعودية أو الإيرانية
+    // الساحل السعودي تقريباً: lng < 50.8 - (lat-25)*0.3
+    const saudiCoastLng = 50.8 - (lat - 25) * 0.25;
+    if (lng < saudiCoastLng && lat < 27.5) return false; // غرب الساحل السعودي = يابسة
+    // الساحل الإيراني تقريباً: lng > 49.5 + (lat-26)*1.8
+    // (لا حاجة لهذا الفحص لأن نقاط المسار محددة مسبقاً)
+    return true;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  مصادر التوليد — إحداثيات دقيقة من ملف الرسبون
+// ═══════════════════════════════════════════════════════════
+const SPAWN_VARIANTS = {
+    iran_sea: [
+        {idx:53},{idx:52},{idx:51},{idx:50},{idx:49}
+    ],
+    iran_iraq: [
+        {spawnLat:33.65121,spawnLng:50.22949, targetLat:29.80,targetLng:46.30},
+        {spawnLat:31.17521,spawnLng:50.55908, targetLat:29.50,targetLng:46.80},
+        {spawnLat:30.67572,spawnLng:48.84521, targetLat:29.60,targetLng:47.00},
+        {spawnLat:32.68331,spawnLng:47.24396, targetLat:30.20,targetLng:46.00},
+        {spawnLat:33.22950,spawnLng:48.49365, targetLat:29.90,targetLng:46.50},
+        {spawnLat:33.39476,spawnLng:49.15283, targetLat:29.70,targetLng:46.80},
+    ],
+    yemen: [
+        {spawnLat:15.91907,spawnLng:45.52734, targetLat:17.30,targetLng:44.80},
+        {spawnLat:16.29905,spawnLng:47.30713, targetLat:17.10,targetLng:46.50},
+        {spawnLat:16.57302,spawnLng:51.67969, targetLat:17.00,targetLng:50.30},
+        {spawnLat:15.39014,spawnLng:49.19678, targetLat:17.05,targetLng:48.50},
+        {spawnLat:14.26438,spawnLng:45.46143, targetLat:16.80,targetLng:44.50},
+        {spawnLat:14.77488,spawnLng:43.43994, targetLat:17.00,targetLng:43.30},
+        {spawnLat:15.49603,spawnLng:43.42896, targetLat:17.20,targetLng:43.20},
+        {spawnLat:16.06693,spawnLng:44.32983, targetLat:17.10,targetLng:44.00},
+    ]
+};
+
+class Enemy {
+    constructor(routeKey, cfg, farSpawn=false) {
+        this.routeKey = routeKey;
+        this.faction  = routeKey.startsWith('iran') ? 'iran' : 'yemen';
+        this.method   = routeKey === 'iran_sea' ? 'sea' : 'land';
+        this.alive    = true;
+        this.stopped  = false;
+        this.alertSent  = false;
+        this.alert50km  = false;   // إنذار عند 50 كم
+        this.disembarked = false;
+        this.marker   = null;
+        this.hidden   = false;
+        this.detected = true;
+
+        const variants = SPAWN_VARIANTS[routeKey];
+        const v = cfg || variants[Math.floor(Math.random()*variants.length)];
+
+        if (routeKey === 'iran_sea' && !cfg) {
+            // ═══ السفن: تبدأ من نقاط شمال الخليج المعتمدة (بحر 100%) ═══
+            const spawnIdx = SHIP_SPAWN_INDICES[Math.floor(Math.random()*SHIP_SPAWN_INDICES.length)];
+            const spawnPt = GULF_SEA_PATH[spawnIdx];
+            this.lat = spawnPt[0] + (Math.random()-0.5)*0.15;
+            this.lng = spawnPt[1] + (Math.random()-0.5)*0.15;
+            // نقطة الرسو: نختار من نقاط الساحل السعودي في المسار
+            const coastIdx = COAST_LANDING_INDICES[Math.floor(Math.random()*COAST_LANDING_INDICES.length)];
+            const coastPt = GULF_SEA_PATH[coastIdx];
+            this.targetLat = coastPt[0];
+            this.targetLng = coastPt[1];
+            this.type  = 'ship';
+            this.speed = 0.00008 + Math.random()*0.00004;
+            // مخفية حتى تصل منتصف الخليج (خط طول 52.0°E)
+            this.hidden   = (this.lng > 52.0);
+            this.detected = !this.hidden;
+            if (!this.hidden) this._buildMarker();
+        } else if (routeKey === 'iran_sea' && cfg) {
+            // ═══ جنود منزلون من السفن — يُعيَّن موقعهم خارجياً ═══
+            this.lat = 0; this.lng = 0;
+            this.targetLat = 0; this.targetLng = 0;
+            this.type  = 'soldier';
+            this.speed = 0.00006 + Math.random()*0.00004;
+            this.hidden = false; this.detected = true;
+        } else if (farSpawn && routeKey === 'yemen') {
+            // ═══ قوات يمن بعيدة ~300 كم — من ملف الرسبون (النقاط الجنوبية) ═══
+            const yemenFarVariants = [
+                {spawnLat:14.26438,spawnLng:45.46143, targetLat:16.80,targetLng:44.50},
+                {spawnLat:14.77488,spawnLng:43.43994, targetLat:17.00,targetLng:43.30},
+                {spawnLat:15.39014,spawnLng:49.19678, targetLat:17.05,targetLng:48.50},
+                {spawnLat:15.49603,spawnLng:43.42896, targetLat:17.20,targetLng:43.20},
+                {spawnLat:15.91907,spawnLng:45.52734, targetLat:17.30,targetLng:44.80},
+            ];
+            const fv = yemenFarVariants[Math.floor(Math.random()*yemenFarVariants.length)];
+            this.lat = fv.spawnLat + (Math.random()-0.5)*0.4;
+            this.lng = fv.spawnLng + (Math.random()-0.5)*0.4;
+            this.targetLat = fv.targetLat + (Math.random()-0.5)*0.3;
+            this.targetLng = fv.targetLng + (Math.random()-0.5)*0.3;
+            this.type  = Math.random()>0.45 ? 'tank' : 'soldier';
+            this.speed = 0.00006 + Math.random()*0.00004;
+            // لا نبني الـ marker هنا — spawnEnemy ستبني بعد تحديد النوع
+        } else {
+            // ═══ القوات البرية العادية ═══
+            this.lat = v.spawnLat + (Math.random()-0.5)*0.8;
+            this.lng = v.spawnLng + (Math.random()-0.5)*0.8;
+            this.targetLat = v.targetLat + (Math.random()-0.5)*0.3;
+            this.targetLng = v.targetLng + (Math.random()-0.5)*0.3;
+            this.type  = Math.random()>0.45 ? 'tank' : 'soldier';
+            this.speed = 0.00006 + Math.random()*0.00004;
+            this._buildMarker();
+        }
+    }
+
+    _buildMarker() {
+        if (this.marker) { map.removeLayer(this.marker); this.marker = null; }
+        const wrap = document.createElement('div');
+        wrap.className = 'enemy-wrapper';
+        const ring = document.createElement('div');
+        ring.className = 'enemy-ring';
+        const core = document.createElement('div');
+        if      (this.type==='tank')    core.className = 'enemy-tank';
+        else if (this.type==='soldier') core.className = 'enemy-soldier';
+        else                            core.className = 'enemy-ship';
+        wrap.appendChild(ring);
+        wrap.appendChild(core);
+        wrap.style.cursor = 'pointer';
+
+        this.marker = L.marker([this.lat, this.lng], {
+            icon: L.divIcon({html:wrap, className:'', iconSize:[30,30], iconAnchor:[15,15]})
+        }).addTo(map);
+
+        const lbl = this.type==='tank'?'🟥 دبابة معادية':this.type==='soldier'?'🔴 قوات مشاة':'🟥 سفينة حربية';
+        const fac = this.faction==='iran' ? 'إيرانية' : 'يمنية (حوثي)';
+        this.marker.bindTooltip(`${lbl}<br><span style="color:#888">${fac}</span>`,
+            {direction:'top', offset:[0,-16]});
+
+        this.marker.on('click', ev => {
+            L.DomEvent.stopPropagation(ev);
+            if (fireMode && selectedBase && selectedMissile && !this.hidden) {
+                const useTrack = trackingMode;
+                fireMode=false; engagementActive=false; trackingMode=false;
+                document.getElementById('tracking-badge').style.display='none';
+                document.getElementById('base-fire-btn').innerText='🎯 تفعيل وضع الاشتباك';
+                document.getElementById('base-fire-btn').style.background='';
+                if (useTrack) launchTrackingMissile(selectedBase.coords, this);
+                else          launchMissileAtEnemy(selectedBase.coords, this);
+            }
+        });
+    }
+
+    // ═══ حساب المسافة بالكيلومتر إلى أقرب نقطة من الحدود ═══
+    _distToSaudiBorder() {
+        let minDist = Infinity;
+        for (let i = 0; i < saudiBorder.length-1; i++) {
+            const d = map.distance([this.lat,this.lng], saudiBorder[i]);
+            if (d < minDist) minDist = d;
+        }
+        return minDist / 1000;  // بالكيلومتر
+    }
+
+    update() {
+        if (!this.alive || this.stopped) return;
+
+        const dlat = this.targetLat - this.lat;
+        const dlng = this.targetLng - this.lng;
+        const distDeg = Math.sqrt(dlat*dlat + dlng*dlng);
+        if (distDeg < 0.001) return; // منع القسمة على صفر
+
+        // تحريك الوحدة
+        this.lat += (dlat/distDeg) * this.speed;
+        this.lng += (dlng/distDeg) * this.speed;
+
+        // ═══ معالجة السفن المخفية ═══
+        if (this.type === 'ship' && this.hidden) {
+            // تظهر السفينة عند وصول منتصف الخليج (خط طول 52.0°E)
+            if (this.lng <= 52.0) {
+                this.hidden   = false;
+                this.detected = true;
+                this._buildMarker();
+                const km = Math.round(this._distToSaudiBorder());
+                showRadarAlertNormal(`📡 رُصدت سفن حربية إيرانية في الخليج — على بُعد ${km} كم`);
+                log(`📡 كشف راداري: سفن إيرانية في الخليج (${km} كم من حدودنا)`, 'fail');
+                playSound('snd-alert');
+            }
+            return; // لا تحديث للـ marker قبل الكشف
+        }
+
+        // تحديث موقع الـ marker
+        if (this.marker) this.marker.setLatLng([this.lat, this.lng]);
+
+        // ═══ نظام الإنذار المبكر الدقيق (بالمسافة الحقيقية للحدود) ═══
+        const kmToBorder = this._distToSaudiBorder();
+
+        // إنذار أول: عند 200 كم من الحدود
+        if (kmToBorder < 200 && !this.alertSent) {
+            this.alertSent = true;
+            const unit = this.type==='ship'?'سفن حربية':this.type==='tank'?'دبابات إيرانية':'قوات مشاة';
+            const origin = this.faction==='iran'
+                ? (this.method==='sea' ? 'الخليج العربي' : 'العراق')
+                : 'اليمن';
+            showRadarAlertNormal(`⚠ رصد: ${unit} من ${origin} — ${Math.round(kmToBorder)} كم من حدودنا`);
+            log(`⚠ رصد مبكر: ${unit} من ${origin} — ${Math.round(kmToBorder)} كم`, 'fail');
+        }
+
+        // إنذار ثاني: عند 50 كم — تحذير خطر داهم
+        if (kmToBorder < 50 && !this.alert50km) {
+            this.alert50km = true;
+            const unit = this.type==='ship'?'سفن':'دبابات/مشاة';
+            const origin = this.faction==='iran'
+                ? (this.method==='sea' ? 'الخليج' : 'الحدود الشمالية')
+                : 'الحدود الجنوبية';
+            showRadarAlertNormal(`🚨 تحذير! ${unit} على بُعد ${Math.round(kmToBorder)} كم — ${origin}`);
+            log(`🚨 اقتراب خطير: ${unit} ${Math.round(kmToBorder)} كم من الحدود`, 'fail');
+        }
+
+        // ═══ السفن: توقف عند الشاطئ — يجب أن تبقى في البحر ═══
+        if (this.type === 'ship') {
+            // إذا وصلت السفينة لنقطة الهدف الساحلية أو اقتربت جداً
+            if (distDeg < 0.10) {
+                this.stopped = true;
+                if (!this.disembarked) {
+                    this.disembarked = true;
+                    this._disembark();
+                }
+                return;
+            }
+            // تأمين إضافي: لا تتجاوز السفينة خط الساحل السعودي (lng < 50.85)
+            // ولا تقترب أكثر من اللازم من اليابسة
+            if (this.lng < 49.3) {
+                this.stopped = true;
+                if (!this.disembarked) {
+                    this.disembarked = true;
+                    this._disembark();
+                }
+                return;
+            }
+        }
+
+        // ═══ القوات البرية: توقف قبل الحدود مباشرة ═══
+        if (this.type !== 'ship' && distDeg < 0.20) {
+            this.stopped = true;
+            return;
+        }
+
+        // ═══ تفعيل الدفاع إذا دخلت وحدة برية الأراضي السعودية ═══
+        if (this.type !== 'ship' && isInsideSaudi(this.lat, this.lng)) {
+            triggerDefenseResponse();
+        }
+    }
+
+    _disembark() {
+        const count = 2 + Math.floor(Math.random()*2);
+        log('🚢 السفينة رست — ينزل الجنود على الساحل', 'fail');
+        playSound('snd-alert');
+        for (let i = 0; i < count; i++) {
+            setTimeout(() => {
+                if (gameOver) return;
+                // الجنود ينزلون من موقع السفينة
+                const soldierLat = this.lat + (Math.random()-0.5)*0.05;
+                const soldierLng = this.lng + (Math.random()-0.5)*0.05;
+                // هدف الجنود: نقطة على الساحل السعودي (لا يدخلون البر)
+                // يتجهون غرباً قليلاً نحو الساحل لكن يتوقفون عند الحدود
+                const dTarget = DISEMBARK_TARGETS[Math.floor(Math.random()*DISEMBARK_TARGETS.length)];
+                const s = new Enemy('iran_sea', {idx:0});
+                s.lat = soldierLat;
+                s.lng = soldierLng;
+                s.type   = 'soldier';
+                s.method = 'land';
+                s.hidden = false;
+                s.detected = true;
+                // الجنود يتجهون لنقطة ساحلية محددة — يتوقفون قبل الدخول للبر
+                s.targetLat = dTarget.lat;
+                s.targetLng = dTarget.lng;
+                s._buildMarker();
+                enemies.push(s);
+            }, i * 2000);
+        }
+    }
+
+    destroy() {
+        if (!this.alive) return;
+        this.alive  = false;
+        this.hidden = false;
+        if (this.marker) { map.removeLayer(this.marker); this.marker = null; }
+        enemies = enemies.filter(e => e !== this);
+    }
+}
+
+// =============================================
+//   DEFENSE RESPONSE
+// =============================================
+function triggerDefenseResponse() {
+    if (defenseTriggered||gameOver) return;
+    defenseTriggered=true; gameOver=true;
+    playSound('snd-alert');
+    log('🚨 خرق للحدود! تفعيل الدفاع الصاروخي الشامل!','fail');
+    showRadarAlertNormal('🚨 تجاوز الحدود! الدفاع الصاروخي الشامل مُفعَّل!');
+
+    const alive=[...enemies];
+    let shots=0;
+    militaryBases.forEach((base,bi)=>{
+        alive.forEach((en,ei)=>{
+            if(!en.alive) return;
+            setTimeout(()=>{
+                if(!en.alive) return;
+                const mk=['df21','stormshadow','thaad','gemt','pac3'][Math.floor(Math.random()*5)];
+                const m=MISSILES[mk];
+                const d=map.distance(base.coords,[en.lat,en.lng]);
+                const dur=Math.min(3000,Math.max(1000,d/m.speed*1000));
+                playSound('snd-missile');
+                const line=L.polyline([base.coords,base.coords],{color:m.color,weight:1.5,dashArray:'3,3',opacity:0.8}).addTo(map);
+                const hEl=document.createElement('div');
+                hEl.style.cssText=`width:7px;height:7px;background:${m.color};border-radius:50%;box-shadow:0 0 10px ${m.color}`;
+                const hM=L.marker(base.coords,{icon:L.divIcon({html:hEl,className:'',iconSize:[7,7],iconAnchor:[3,3]})}).addTo(map);
+                const st=performance.now();
+                function anim(now){
+                    const p=Math.min(1,(now-st)/dur);
+                    const lat=base.coords[0]+(en.lat-base.coords[0])*p;
+                    const lng=base.coords[1]+(en.lng-base.coords[1])*p;
+                    line.setLatLngs([base.coords,[lat,lng]]); hM.setLatLng([lat,lng]);
+                    if(p<1){requestAnimationFrame(anim);}else{
+                        map.removeLayer(line); map.removeLayer(hM);
+                        createExplosion([en.lat,en.lng],false,m);
+                        if(en.alive){en.alive=false;setTimeout(()=>{if(en.marker){map.removeLayer(en.marker);en.marker=null;}enemies=enemies.filter(e=>e!==en);},100);}
+                    }
+                }
+                requestAnimationFrame(anim);
+            },bi*300+ei*600+Math.random()*400);
+            shots++;
+        });
+    });
+    setTimeout(()=>{ document.getElementById('end-screen').style.display='flex'; },Math.max(5000,shots*200));
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  نظام السيناريو ثلاثي المراحل
+//
+//  المرحلة 1 (0-3 دقائق): هجمات استطلاعية أولية
+//    — يمن: 1-2 دبابة/جندي
+//    — إيران/العراق: 1-2 دبابة/جندي
+//    — السفن: غائبة
+//
+//  المرحلة 2 (3-5 دقائق): تصاعد متوسط عشوائي
+//    — سفن إيرانية تظهر في الخليج (1-3 عشوائياً)
+//    — يمن: 3-4 جند + 3-4 دبابات
+//    — إيران/العراق: 5-6 دبابات + 5-8 جنود
+//    — التوقيت عشوائي بالكامل خلال الفترة
+//
+//  المرحلة 3 (5-8 دقائق): هجوم كثيف — صعوبة قصوى
+//    — 8-12 سفينة متباعدة
+//    — 18-20 وحدة برية شمالية (عراق)
+//    — 10-15 وحدة برية جنوبية (يمن) — مسافة إضافية 300 كم
+//
+//  المرحلة 4 (8+ دقائق): صواريخ باليستية إيرانية
+//    — 10-40 صاروخ عشوائي يضرب داخل الأراضي السعودية
+//    — اللاعب ينقر الصاروخ لإسقاطه
+// ═══════════════════════════════════════════════════════════════════
+
+const routes=['iran_sea','iran_iraq','yemen'];
+
+// ── أداة مساعدة: تأخير عشوائي ──
+function rnd(min, max) { return min + Math.random()*(max-min); }
+function rndInt(min, max) { return Math.floor(rnd(min, max+1)); }
+
+// ── جدولة آمنة مع تتبع للإلغاء ──
+function scheduleT(fn, ms) {
+    const id = setTimeout(() => { if(!gameOver) fn(); }, ms);
+    phaseTimers.push(id);
+    return id;
+}
+
+function startGameSpawning() {
+    gameStartTime = Date.now();
+    gameElapsedSec = 0;
+    wavePhase = 0;
+    phase3Active = false;
+
+    // ── تهيئة الصواريخ المقفلة ──
+    MISSILES.df3.ammoLeft  = 0;
+    MISSILES.df21.ammoLeft = 0;
+
+    // ── عداد الوقت ──
+    const clockInterval = setInterval(() => {
+        if (gameOver) { clearInterval(clockInterval); return; }
+        gameElapsedSec = Math.floor((Date.now()-gameStartTime)/1000);
+    }, 1000);
+    phaseTimers.push(clockInterval);
+
+    runPhase1();
+
+    // ── فتح DF3 و DF21 بعد 3 دقائق ──
+    scheduleT(() => {
+        MISSILES.df3.locked  = false;
+        MISSILES.df21.locked = false;
+        MISSILES.df3.ammoLeft  = 5;
+        MISSILES.df21.ammoLeft = 5;
+        ['df3','df21'].forEach(id => {
+            const btn = document.getElementById('btn-'+id);
+            if (btn) {
+                btn.disabled = false;
+                btn.classList.remove('weapon-locked');
+                btn.classList.add('weapon-unlocked');
+                const nm = id==='df3'? 'DF-3A' : 'DF-21C';
+                btn.innerHTML = `▲ ${nm} — <span class="ammo-count" id="ammo-${id}">5/5</span><span class="weapon-range">مدى: ${MISSILES[id].range} كم | متاح الآن ×5</span>`;
+                setTimeout(()=>btn.classList.remove('weapon-unlocked'), 2000);
+            }
+        });
+        showRadarAlertNormal('🟢 تم تفعيل الصواريخ الباليستية DF-3A و DF-21C — ×5 لكل منهما!');
+        log('🟢 الصواريخ الباليستية جاهزة — DF-3A و DF-21C (×5 لكل)', 'success');
+        playSound('snd-alert');
+        wavePhase=1; runPhase2();
+    }, 180000);
+
+    // تشغيل المرحلة 3 بعد 5 دقائق
+    scheduleT(() => { wavePhase=2; runPhase3(); }, 300000);
+
+    // تشغيل المرحلة 4 (صواريخ + ضغط قصوى) بعد 8 دقائق
+    scheduleT(() => { wavePhase=3; runPhase4(); }, 480000);
+}
+
+// ═══════════════════════════════
+//  المرحلة 1: 0-3 دقائق — هادئ نسبياً
+// ═══════════════════════════════
+function runPhase1() {
+    // من اليمن: 1-2 وحدة
+    const yemenCount = rndInt(1,2);
+    for (let i=0; i<yemenCount; i++) {
+        scheduleT(() => spawnEnemy('yemen'), rnd(8000, 90000));
+    }
+    // من العراق: 1-2 وحدة
+    const iraqCount = rndInt(1,2);
+    for (let i=0; i<iraqCount; i++) {
+        scheduleT(() => spawnEnemy('iran_iraq'), rnd(20000, 150000));
+    }
+    log('🟢 نظام الرصد جاهز — مراقبة الحدود', 'info');
+}
+
+// ═══════════════════════════════
+//  المرحلة 2: 3-5 دقائق — تصاعد عشوائي
+// ═══════════════════════════════
+function runPhase2() {
+    showRadarAlertNormal('⚠ رُصدت تحركات معادية متزايدة على الحدود');
+    log('⚠ تصاعد التهديد — رصد تحركات من متعدد المحاور', 'fail');
+
+    const phase2Duration = 120000; // دقيقتان
+
+    // سفن إيرانية (1-3 سفن) تظهر في البحر عشوائياً
+    const shipCount = rndInt(1,3);
+    for (let i=0; i<shipCount; i++) {
+        scheduleT(() => spawnEnemy('iran_sea'), rnd(5000, phase2Duration));
+    }
+
+    // قوات يمنية: 3-4 جند + 3-4 دبابات (كل منهم في وقت عشوائي)
+    const yemenSoldiers = rndInt(3,4);
+    const yemenTanks    = rndInt(3,4);
+    for (let i=0; i<yemenSoldiers; i++) scheduleT(()=>spawnEnemy('yemen','soldier'), rnd(10000, phase2Duration));
+    for (let i=0; i<yemenTanks;    i++) scheduleT(()=>spawnEnemy('yemen','tank'),    rnd(15000, phase2Duration));
+
+    // قوات إيرانية/عراق: 5-6 دبابات + 5-8 جنود
+    const iraqTanks   = rndInt(5,6);
+    const iraqSoldiers= rndInt(5,8);
+    for (let i=0; i<iraqTanks;    i++) scheduleT(()=>spawnEnemy('iran_iraq','tank'),    rnd(10000, phase2Duration));
+    for (let i=0; i<iraqSoldiers; i++) scheduleT(()=>spawnEnemy('iran_iraq','soldier'), rnd(20000, phase2Duration));
+}
+
+// ═══════════════════════════════
+//  المرحلة 3: 5-8 دقائق — هجوم ساحق
+// ═══════════════════════════════
+function runPhase3() {
+    phase3Active = true;
+    showRadarAlertNormal('🚨 هجوم شامل! قوات ضخمة من جميع المحاور!');
+    log('🚨 المرحلة الحرجة — هجوم كثيف متزامن!', 'fail');
+    playSound('snd-alert');
+
+    const phase3Duration = 180000; // 3 دقائق
+
+    // ── سفن إيرانية: 8-12 سفينة متباعدة ──
+    // نضمن التباعد بإطلاقهن بفواصل زمنية
+    const shipCount = rndInt(8,12);
+    for (let i=0; i<shipCount; i++) {
+        // تباعد مقصود: كل سفينة تظهر بعد الأخرى بـ 8-20 ثانية
+        const delay = rnd(5000, 40000) + i * rnd(8000, 18000);
+        if (delay < phase3Duration) {
+            scheduleT(() => spawnEnemy('iran_sea'), delay);
+        }
+    }
+
+    // ── قوات شمالية (إيران/عراق): 18-20 وحدة ──
+    const northTotal = rndInt(18,20);
+    for (let i=0; i<northTotal; i++) {
+        const isT = Math.random() > 0.45;
+        scheduleT(() => spawnEnemy('iran_iraq', isT?'tank':'soldier'), rnd(3000, phase3Duration));
+    }
+
+    // ── قوات جنوبية (يمن): 10-15 وحدة — spawn بعيد 300 كم ──
+    const southTotal = rndInt(10,15);
+    for (let i=0; i<southTotal; i++) {
+        const isT = Math.random() > 0.45;
+        scheduleT(() => spawnEnemy('yemen_far', isT?'tank':'soldier'), rnd(3000, phase3Duration));
+    }
+}
+
+// ═══════════════════════════════
+//  المرحلة 4: 8+ دقائق — ضغط قصوى + صواريخ
+// ═══════════════════════════════
+function runPhase4() {
+    log('🚀 ⚡ المرحلة النهائية — هجوم كامل الأبعاد!', 'fail');
+    showBallisticAlert('🚀 صواريخ باليستية إيرانية + هجوم ساحق من الجهات كافة!');
+    playSound('snd-alert');
+
+    const phase4Duration = 420000; // 7 دقائق (يصل إلى 15 دقيقة إجمالاً)
+
+    // ── صواريخ باليستية: 10-40 صاروخ بفواصل قصيرة عشوائية ──
+    const missileCount = rndInt(10, 40);
+    let launched = 0;
+
+    function launchNextBallistic() {
+        if (gameOver || launched >= missileCount) return;
+        spawnBallisticMissile();
+        launched++;
+        const nextDelay = rnd(5000, 18000); // أسرع من السابق (5-18 ثانية)
+        const id = setTimeout(launchNextBallistic, nextDelay);
+        phaseTimers.push(id);
+    }
+    launchNextBallistic();
+
+    // ── سفن إضافية: 4-6 سفن ──
+    const extraShips = rndInt(4,6);
+    for (let i=0; i<extraShips; i++) {
+        scheduleT(()=>spawnEnemy('iran_sea'), rnd(3000, 60000) + i*rnd(8000,15000));
+    }
+
+    // ── قوات إيرانية شمالية ضخمة: 20-25 وحدة ──
+    const northCount = rndInt(20,25);
+    for (let i=0; i<northCount; i++) {
+        const isT = Math.random()>0.4;
+        scheduleT(()=>spawnEnemy('iran_iraq', isT?'tank':'soldier'), rnd(2000, phase4Duration));
+    }
+
+    // ── قوات يمنية جنوبية: 15-20 وحدة — بعيدة ──
+    const southCount = rndInt(15,20);
+    for (let i=0; i<southCount; i++) {
+        const isT = Math.random()>0.4;
+        scheduleT(()=>spawnEnemy('yemen_far', isT?'tank':'soldier'), rnd(2000, phase4Duration));
+    }
+}
+
+// ═══════════════════════════════════════════════
+//  دالة توليد عدو واحد (مع دعم النوع المحدد)
+// ═══════════════════════════════════════════════
+function spawnEnemy(routeKey, forceType) {
+    if (gameOver) return;
+
+    let en;
+    if (routeKey === 'yemen_far') {
+        // قوات يمن بعيدة — spawn على بُعد ~300 كم من الحدود
+        en = new Enemy('yemen', null, true); // true = farSpawn
+        if (forceType) en.type = forceType;
+        en._buildMarker();
+    } else {
+        en = new Enemy(routeKey);
+        if (forceType && routeKey !== 'iran_sea') {
+            en.type = forceType;
+            en._buildMarker(); // أعد بناء الـ marker بالنوع الصحيح
+        }
+    }
+
+    if (en.lat === 0 && en.lng === 0) { return; } // جندي سفينة سيُضبط لاحقاً
+
+    enemies.push(en);
+
+    // إشعار الرصد — للسفن فقط عند الكشف
+    if (routeKey !== 'iran_sea' || !en.hidden) {
+        const names = {
+            iran_sea:   'سفن إيرانية في الخليج',
+            iran_iraq:  en.type==='tank'?'دبابات إيرانية من العراق':'مشاة إيرانية من العراق',
+            yemen:      en.type==='tank'?'دبابات حوثية من اليمن':'مشاة حوثية من اليمن',
+            yemen_far:  en.type==='tank'?'دبابات حوثية — جنوب الحدود':'مشاة حوثية — جنوب الحدود'
+        };
+        const nm = names[routeKey] || 'قوات معادية';
+        log(`📡 رُصد: ${nm}`, 'fail');
+    }
+    updateEnemyCount();
+}
+
+// ═══════════════════════════════════════════════
+//  صاروخ باليستي إيراني
+// ═══════════════════════════════════════════════
+
+// مناطق عشوائية داخل الأراضي السعودية (أهداف محتملة)
+const SAUDI_INTERIOR_TARGETS = [
+    [24.68, 46.72], // الرياض
+    [21.48, 39.19], // جدة
+    [26.26, 50.15], // الظهران
+    [24.06, 47.58], // الخرج
+    [27.90, 45.53], // حفر الباطن
+    [21.48, 40.54], // الطائف
+    [28.39, 36.57], // تبوك
+    [25.39, 49.58], // الأحساء
+    [22.00, 41.00], // بيشة
+    [20.50, 44.78], // وادي الدواسر
+    [18.30, 42.73], // خميس مشيط
+    [24.71, 46.72], // شمال الرياض
+    [23.50, 44.00], // وسط السعودية
+    [26.50, 43.50], // وسط شمال
+    [29.00, 41.80], // القصيم الشمالي
+];
+
+function spawnBallisticMissile() {
+    if (gameOver) return;
+
+    // نقاط إطلاق من إيران — من ملف الرسبون بالضبط
+    const launchGroups = [
+        // المجموعة الأولى
+        [[32.65325,50.94910],[33.04090,51.80603],[32.56533,52.40479],[32.20815,51.58630]],
+        // المجموعة الثانية
+        [[29.68328,52.40753],[29.72741,52.59293],[29.53762,52.66708],[29.51253,52.47070]]
+    ];
+    const group = launchGroups[Math.floor(Math.random()*launchGroups.length)];
+    const lp = group[Math.floor(Math.random()*group.length)];
+
+    // هدف عشوائي داخل السعودية
+    const tp = SAUDI_INTERIOR_TARGETS[Math.floor(Math.random()*SAUDI_INTERIOR_TARGETS.length)];
+    const targetLat = tp[0] + (Math.random()-0.5)*2.0;
+    const targetLng = tp[1] + (Math.random()-0.5)*2.0;
+
+    // حساب زاوية الصاروخ نحو الهدف
+    const dLat = targetLat - lp[0];
+    const dLng = targetLng - lp[1];
+    const angleDeg = Math.atan2(dLng, dLat) * 180 / Math.PI;
+
+    const bm = {
+        alive: true,
+        lat: lp[0], lng: lp[1],
+        targetLat, targetLng,
+        angleDeg,
+        speed: 0.0008 + Math.random()*0.0004, // سريع جداً
+        marker: null,
+    };
+
+    // بناء المؤشر — أسطواني موجَّه نحو الهدف
+    const el = document.createElement('div');
+    el.className = 'ballistic-missile';
+    el.innerHTML = '<div class="ballistic-body"></div>';
+    // تدوير نحو الهدف
+    el.style.transform = `rotate(${angleDeg}deg)`;
+    el.style.transformOrigin = 'center center';
+
+    bm.marker = L.marker([bm.lat, bm.lng], {
+        icon: L.divIcon({
+            html: el, className:'',
+            iconSize:[8,28], iconAnchor:[4,14]
+        }),
+        zIndexOffset: 1000
+    }).addTo(map);
+
+    bm.marker.bindTooltip(`🚀 صاروخ باليستي إيراني`,
+        {direction:'top', offset:[0,-20]});
+
+    bm.marker.on('click', ev => {
+        L.DomEvent.stopPropagation(ev);
+        interceptBallistic(bm);
+    });
+
+    ballisticMissiles.push(bm);
+
+    // ═══ إنذار مميز للصاروخ الباليستي ═══
+    showBallisticAlert('🚀 إطلاق صاروخ باليستي إيراني نحو الأراضي السعودية!');
+    log('🚀 ⚡ صاروخ باليستي مُطلق من إيران!', 'fail');
+
+    document.getElementById('mini-radar').classList.add('radar-missile-mode');
+    setTimeout(() => document.getElementById('mini-radar').classList.remove('radar-missile-mode'), 5000);
+
+    updateEnemyCount();
+}
+
+// اعتراض الصاروخ الباليستي
+function interceptBallistic(bm) {
+    if (!bm.alive) return;
+
+    // إيجاد أقرب قاعدة جوية للصاروخ
+    let nearestBase = militaryBases[0];
+    let minDist = Infinity;
+    militaryBases.forEach(base => {
+        const d = map.distance(base.coords, [bm.lat, bm.lng]);
+        if (d < minDist) { minDist = d; nearestBase = base; }
+    });
+
+    bm.alive = false;
+    playSound('snd-missile');
+
+    // صاروخ اعتراض من القاعدة الأقرب
+    const intColor = '#00ddff';
+    const dur = Math.max(800, Math.min(2500, minDist/6000*1000));
+    const st = performance.now();
+    const line = L.polyline([nearestBase.coords, nearestBase.coords],
+        {color: intColor, weight:2, dashArray:'3,3', opacity:0.9}).addTo(map);
+    const hEl = document.createElement('div');
+    hEl.style.cssText = `width:8px;height:8px;background:${intColor};border-radius:50%;box-shadow:0 0 12px ${intColor}`;
+    const hM = L.marker(nearestBase.coords, {
+        icon: L.divIcon({html:hEl, className:'', iconSize:[8,8], iconAnchor:[4,4]})
+    }).addTo(map);
+
+    const snapLat=bm.lat, snapLng=bm.lng;
+    function aintercept(now) {
+        const p = Math.min(1, (now-st)/dur);
+        const lat = nearestBase.coords[0] + (snapLat-nearestBase.coords[0])*p;
+        const lng = nearestBase.coords[1] + (snapLng-nearestBase.coords[1])*p;
+        line.setLatLngs([nearestBase.coords, [lat,lng]]);
+        hM.setLatLng([lat, lng]);
+        if (p < 1) {
+            requestAnimationFrame(aintercept);
+        } else {
+            map.removeLayer(line); map.removeLayer(hM);
+            // انفجار الاعتراض
+            const expColor = '#ff8800';
+            const w1 = L.circle([snapLat,snapLng], {radius:15000, color:expColor, fillColor:expColor, fillOpacity:0.6, weight:2}).addTo(map);
+            const w2 = L.circle([snapLat,snapLng], {radius:35000, color:expColor, fillColor:expColor, fillOpacity:0.15, weight:1}).addTo(map);
+            let s=0;
+            const ai=setInterval(()=>{s++;w1.setStyle({fillOpacity:Math.max(0,0.6-s*0.06)});w2.setStyle({fillOpacity:Math.max(0,0.15-s*0.015)});if(s>10){clearInterval(ai);map.removeLayer(w1);map.removeLayer(w2);}},80);
+            if(bm.marker){map.removeLayer(bm.marker);bm.marker=null;}
+            ballisticMissiles = ballisticMissiles.filter(m=>m!==bm);
+            hitCount++; document.getElementById('hit-count').innerText=hitCount;
+            playSound('snd-destroyed');
+            log(`✓ اعتراض صاروخ باليستي — ${nearestBase.name}`, 'success');
+            updateEnemyCount();
+        }
+    }
+    requestAnimationFrame(aintercept);
+}
+
+// حلقة تحريك الصواريخ الباليستية
+function updateBallisticMissiles() {
+    ballisticMissiles.forEach(bm => {
+        if (!bm.alive) return;
+        const dlat = bm.targetLat - bm.lat;
+        const dlng = bm.targetLng - bm.lng;
+        const d = Math.sqrt(dlat*dlat+dlng*dlng);
+        if (d < 0.001) return;
+        bm.lat += (dlat/d)*bm.speed;
+        bm.lng += (dlng/d)*bm.speed;
+        if (bm.marker) {
+            bm.marker.setLatLng([bm.lat, bm.lng]);
+            // تحديث اتجاه الصاروخ ليتجه دائماً نحو الهدف
+            const angle = Math.atan2(dlng, dlat) * 180 / Math.PI;
+            const el = bm.marker.getElement();
+            if (el) {
+                const inner = el.querySelector('.ballistic-missile');
+                if (inner) inner.style.transform = `rotate(${angle}deg)`;
+            }
+        }
+
+        // وصل الهدف — ضرب الأرض
+        if (d < 0.04) {
+            bm.alive = false;
+            if (bm.marker) { map.removeLayer(bm.marker); bm.marker=null; }
+            ballisticMissiles = ballisticMissiles.filter(m=>m!==bm);
+            const ec='#ff4400';
+            const w=L.circle([bm.targetLat,bm.targetLng],{radius:20000,color:ec,fillColor:ec,fillOpacity:0.75,weight:2}).addTo(map);
+            const w2=L.circle([bm.targetLat,bm.targetLng],{radius:50000,color:ec,fillColor:ec,fillOpacity:0.15,weight:1}).addTo(map);
+            let s=0;const ai=setInterval(()=>{s++;w.setStyle({fillOpacity:Math.max(0,0.75-s*0.075)});w2.setStyle({fillOpacity:Math.max(0,0.15-s*0.015)});if(s>10){clearInterval(ai);map.removeLayer(w);map.removeLayer(w2);}},80);
+            playSound('snd-explosion');
+            log('💥 صاروخ باليستي أصاب هدفاً داخل الأراضي السعودية!', 'fail');
+            updateEnemyCount();
+        }
+    });
+}
+
+function updateEnemyCount() {
+    const c = enemies.filter(e=>e.alive).length + ballisticMissiles.filter(b=>b.alive).length;
+    document.getElementById('e-count').innerText=c;
+    document.getElementById('e-count-top').innerText=c;
+    const tl=document.getElementById('threat-level');
+    if(c<=3){tl.innerText='منخفض';tl.className='value';}
+    else if(c<=8){tl.innerText='متوسط';tl.className='value warning';}
+    else{tl.innerText='مرتفع';tl.className='value danger';}
+}
+
+// ── إشعار الرادار العادي ──
+function showRadarAlertNormal(msg) {
+    const el=document.getElementById('radar-alert');
+    el.innerText=msg; el.style.display='block';
+    el.style.background='rgba(180,0,0,0.92)';
+    el.style.borderColor='#ff4444';
+    el.style.boxShadow='0 0 25px rgba(255,0,0,0.5)';
+    if(alertTO) clearTimeout(alertTO);
+    alertTO=setTimeout(()=>el.style.display='none',4000);
+}
+
+// ── إشعار الصاروخ الباليستي (برتقالي مميز) ──
+let ballisticAlertTO=null;
+function showBallisticAlert(msg) {
+    const el=document.getElementById('ballistic-alert');
+    document.getElementById('ballistic-msg').innerText=msg;
+    el.style.display='block';
+    if(ballisticAlertTO) clearTimeout(ballisticAlertTO);
+    ballisticAlertTO=setTimeout(()=>el.style.display='none',5000);
+    playSound('snd-alert');
+}
+
+// =============================================
+//   GAME LOOP
+// =============================================
+function gameLoop() {
+    enemies.forEach(e=>{ try{e.update();}catch(ex){} });
+    updateBallisticMissiles();
+    updateEnemyCount();
+    requestAnimationFrame(gameLoop);
+}
+gameLoop();
+
+// =============================================
+//   RESTART
+// =============================================
+function restartGame() {
+    document.getElementById('end-screen').style.display='none';
+
+    // تنظيف الأعداء
+    enemies.forEach(e=>{ try{ if(e.marker)map.removeLayer(e.marker); }catch(ex){} });
+    enemies=[];
+
+    // تنظيف الصواريخ الباليستية
+    ballisticMissiles.forEach(bm=>{ try{ if(bm.marker)map.removeLayer(bm.marker); }catch(ex){} });
+    ballisticMissiles=[];
+
+    // إلغاء جميع timeouts / intervals المجدولة
+    phaseTimers.forEach(id=>{ clearTimeout(id); clearInterval(id); });
+    phaseTimers=[];
+    if(midWaveInterval){clearInterval(midWaveInterval);midWaveInterval=null;}
+    if(heavyWaveInterval){clearInterval(heavyWaveInterval);heavyWaveInterval=null;}
+    if(ballisticInterval){clearInterval(ballisticInterval);ballisticInterval=null;}
+
+    // إخفاء الإنذارات
+    document.getElementById('radar-alert').style.display='none';
+    document.getElementById('ballistic-alert').style.display='none';
+    document.getElementById('mini-radar').classList.remove('radar-missile-mode');
+
+    // إعادة ضبط الحالة
+    gameOver=false; defenseTriggered=false; firedCount=0; hitCount=0; wavePhase=0;
+    phase3Active=false;
+    document.getElementById('fired-count').innerText=0;
+    document.getElementById('hit-count').innerText=0;
+    document.getElementById('e-count').innerText=0;
+    document.getElementById('e-count-top').innerText=0;
+    document.getElementById('threat-level').innerText='منخفض';
+    document.getElementById('threat-level').className='value';
+    if(selectedBase){selectedBase.markerEl.classList.remove('selected');selectedBase=null;}
+    selectedMissile=null; fireMode=false; engagementActive=false; trackingMode=false;
+    document.querySelectorAll('.weapon-btn').forEach(b=>b.classList.remove('active'));
+    document.getElementById('selected-info').innerText='لا يوجد صاروخ محدد';
+    document.getElementById('selected-info').style.color='#888';
+    document.getElementById('base-info-panel').style.display='none';
+    document.getElementById('base-fire-btn').style.display='none';
+    if(rangeCircle){map.removeLayer(rangeCircle);rangeCircle=null;}
+
+    document.getElementById('log-container').innerHTML='';
+
+    // إعادة تهيئة الصواريخ المقفلة
+    MISSILES.df3.locked  = true;
+    MISSILES.df21.locked = true;
+    MISSILES.df3.ammoLeft  = 0;
+    MISSILES.df21.ammoLeft = 0;
+    ['df3','df21'].forEach(id=>{
+        const btn = document.getElementById('btn-'+id);
+        if(btn){
+            btn.disabled=true;
+            btn.classList.remove('weapon-unlocked');
+            btn.classList.add('weapon-locked');
+            const nm=id==='df3'?'DF-3A':'DF-21C رياح الشرق';
+            btn.innerHTML=`🔒 ${nm} — <span class="ammo-count" id="ammo-${id}">0/5</span><span class="weapon-range">مدى: ${MISSILES[id].range} كم | يُفعَّل بعد 3 دقائق</span>`;
+        }
+    });
+
+    log('النظام جاهز — جولة جديدة بدأت','success');
+    log('رصد الحدود — إيران / اليمن...','info');
+    startGameSpawning();
+}
+
+// =============================================
+//   BORDER TOGGLE
+// =============================================
+function toggleBorder() {
+    borderVisible=!borderVisible;
+    const btn=document.getElementById('border-btn');
+    if(borderVisible){
+        borderLayer=L.polygon(saudiBorder,{color:'#00ff9d',fillColor:'#00ff9d',fillOpacity:0.04,weight:2,dashArray:'8,4',opacity:0.8}).addTo(map);
+        const labels=[
+            {lat:31.5,lng:40.5,text:'— الحدود الشمالية —'},
+            {lat:24.5,lng:55.0,text:'— الحدود الشرقية —'},
+            {lat:14.5,lng:44.5,text:'— الحدود الجنوبية —'},
+            {lat:22.0,lng:36.5,text:'— الحدود الغربية —'}
+        ];
+        borderLayer._lms=[];
+        labels.forEach(l=>{
+            const lm=L.marker([l.lat,l.lng],{icon:L.divIcon({html:`<div style="color:#00ff9d;font-size:11px;font-family:Cairo;white-space:nowrap;text-shadow:0 0 8px #00ff9d;letter-spacing:2px;">${l.text}</div>`,className:'',iconAnchor:[60,10]})}).addTo(map);
+            borderLayer._lms.push(lm);
+        });
+        btn.classList.add('active'); btn.innerText='🗺 إخفاء حدود المملكة';
+        log('تم تفعيل عرض الحدود','info');
+    } else {
+        if(borderLayer){if(borderLayer._lms)borderLayer._lms.forEach(m=>map.removeLayer(m));map.removeLayer(borderLayer);borderLayer=null;}
+        btn.classList.remove('active'); btn.innerText='🗺 إظهار حدود المملكة';
+    }
+}
+
+// =============================================
+//   RADAR ALERT (الإنذار العادي — أحمر)
+// =============================================
+let alertTO=null;
+function showRadarAlertNormal(msg){
+    const el=document.getElementById('radar-alert');
+    el.innerText=msg; el.style.display='block';
+    el.style.background='rgba(180,0,0,0.92)';
+    el.style.borderColor='#ff4444';
+    el.style.boxShadow='0 0 25px rgba(255,0,0,0.5)';
+    if(alertTO) clearTimeout(alertTO);
+    alertTO=setTimeout(()=>el.style.display='none',4000);
+}
+// alias للتوافق
+function showRadarAlert(msg){ showRadarAlertNormal(msg); }
+
+// =============================================
+//   MINI RADAR
+// =============================================
+const rc=document.getElementById('radar-canvas');
+function resizeRC(){const c=document.getElementById('mini-radar');rc.width=c.offsetWidth;rc.height=c.offsetHeight;}
+resizeRC();
+let radarAngle=0;
+function drawRadar(){
+    const ctx=rc.getContext('2d'),w=rc.width,h=rc.height,cx=w/2,cy=h/2,r=Math.min(w,h)/2-4;
+    ctx.clearRect(0,0,w,h);
+    ctx.strokeStyle='rgba(0,255,157,0.15)'; ctx.lineWidth=0.5;
+    [0.33,0.66,1].forEach(f=>{ctx.beginPath();ctx.arc(cx,cy,r*f,0,Math.PI*2);ctx.stroke();});
+    ctx.beginPath();ctx.moveTo(cx-r,cy);ctx.lineTo(cx+r,cy);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(cx,cy-r);ctx.lineTo(cx,cy+r);ctx.stroke();
+    ctx.save();ctx.translate(cx,cy);ctx.rotate(radarAngle);
+    const sg=ctx.createLinearGradient(0,0,r,0);sg.addColorStop(0,'rgba(0,255,157,0.5)');sg.addColorStop(1,'rgba(0,255,157,0)');
+    ctx.beginPath();ctx.moveTo(0,0);ctx.arc(0,0,r,-0.4,0.4);ctx.fillStyle=sg;ctx.fill();ctx.restore();
+    enemies.forEach(en=>{
+        if (en.hidden) return; // لا تُظهر السفن المخفية في الرادار
+        const bx=cx+(en.lng-46.0)/20*r*0.85;
+        const by=cy-(en.lat-24.5)/18*r*0.85;
+        ctx.beginPath();
+        if(en.type==='ship') ctx.rect(bx-4,by-2,8,4);
+        else if(en.type==='tank') ctx.rect(bx-2.5,by-2.5,5,5);
+        else ctx.arc(bx,by,2.5,0,Math.PI*2);
+        ctx.fillStyle='#ff3b3b';ctx.fill();
+    });
+    // صواريخ باليستية — مثلث برتقالي
+    ballisticMissiles.forEach(bm=>{
+        if(!bm.alive) return;
+        const bx=cx+(bm.lng-46.0)/20*r*0.85;
+        const by=cy-(bm.lat-24.5)/18*r*0.85;
+        ctx.beginPath();
+        ctx.moveTo(bx,by-6); ctx.lineTo(bx-5,by+4); ctx.lineTo(bx+5,by+4); ctx.closePath();
+        ctx.fillStyle='#ff8800'; ctx.fill();
+    });
+    radarAngle+=0.03; requestAnimationFrame(drawRadar);
+}
+drawRadar();
+
+// =============================================
+//   UI HELPERS
+// =============================================
+function log(msg,type='info'){
+    const c=document.getElementById('log-container');
+    const now=new Date();
+    const t=`${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+    const e=document.createElement('div'); e.className=`log-entry ${type}`;
+    e.innerHTML=`<span class="time">${t}</span>${msg}`;
+    c.prepend(e); while(c.children.length>10)c.removeChild(c.lastChild);
+}
+function updateSteps(){
+    document.getElementById('s1').classList.toggle('done',!!selectedBase);
+    document.getElementById('s2').classList.toggle('done',!!selectedMissile);
+    document.getElementById('s3').classList.toggle('done',false);
+}
+setInterval(()=>{
+    const n=new Date();
+    document.getElementById('sys-time').innerText=`${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')}:${String(n.getSeconds()).padStart(2,'0')}`;
+},1000);
+map.on('mousemove',e=>{
+    document.getElementById('m-coords-top').innerText=`${e.latlng.lat.toFixed(4)}°N  ${e.latlng.lng.toFixed(4)}°E`;
+});
+
+// =============================================
+//   START
+// =============================================
+log('النظام جاهز للعمليات','success');
+log('رصد الحدود — إيران / اليمن...','info');
+startGameSpawning();
+</script>
+</body>
+</html>
