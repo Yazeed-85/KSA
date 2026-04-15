@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>نظام القيادة والسيطرة - القوات المسلحة السعودية</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;600;700&family=Cairo:wght@400;700&display=swap" rel="stylesheet">
+    
+    <style>
+        /* تم نقل كافة التنسيقات من الملف الأصلي لضمان ثبات المظهر */
+        :root {
+            --neon: #00ff9d;
+            --neon-dim: rgba(0,255,157,0.15);
+            --neon-glow: 0 0 8px #00ff9d, 0 0 20px rgba(0,255,157,0.4);
+            --danger: #ff3b3b;
+            --warning: #ffb700;
+            --info: #00b4ff;
+            --bg-dark: rgba(2, 10, 6, 0.92);
+            --bg-panel: rgba(4, 18, 10, 0.88);
+            --border: rgba(0,255,157,0.3);
+        }
+
+        *, *::before, *::after { box-sizing: border-box; }
+        body, html { margin: 0; padding: 0; height: 100%; background: #000; color: var(--neon); font-family: 'Rajdhani', 'Cairo', sans-serif; overflow: hidden; }
+
+        #map { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; filter: brightness(0.6) contrast(1.2); }
+        .overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; border: 1px solid var(--border); box-shadow: inset 0 0 100px rgba(0,0,0,0.8); }
+
+        /* الألواح الجانبية */
+        .panel { position: absolute; background: var(--bg-panel); backdrop-filter: blur(10px); border: 1px solid var(--border); z-index: 20; pointer-events: auto; }
+        .header { top: 10px; left: 50%; transform: translateX(-50%); width: 98%; height: 60px; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; border-bottom: 2px solid var(--neon); }
+        
+        /* الرادار */
+        #radar-container { bottom: 20px; right: 20px; width: 220px; height: 220px; border-radius: 50%; border: 2px solid var(--neon); overflow: hidden; }
+        #radar-canvas { width: 100%; height: 100%; }
+
+        /* قائمة التحكم بالصواريخ */
+        .missile-panel { bottom: 20px; left: 20px; width: 300px; padding: 15px; }
+        .m-btn { width: 100%; background: var(--neon-dim); border: 1px solid var(--neon); color: var(--neon); padding: 10px; margin: 5px 0; cursor: pointer; text-align: right; transition: 0.3s; }
+        .m-btn:hover { background: var(--neon); color: #000; }
+        .m-btn.selected { background: var(--neon); color: #000; box-shadow: var(--neon-glow); }
+
+        /* السجل (Logs) */
+        #log-container { top: 80px; left: 20px; width: 280px; max-height: 200px; font-size: 12px; overflow-y: hidden; }
+        .log-entry { margin-bottom: 5px; padding: 3px 8px; border-left: 2px solid var(--info); background: rgba(0,180,255,0.05); }
+        .log-entry.danger { border-left-color: var(--danger); background: rgba(255,59,59,0.05); }
+        .time { color: #888; margin-left: 8px; font-family: monospace; }
+
+        /* شاشة الخسارة */
+        #game-over { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 9999; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+        #game-over h1 { color: var(--danger); font-size: 80px; text-shadow: 0 0 20px var(--danger); margin: 0; }
+        
+        .step-indicator { display: flex; gap: 10px; margin-top: 5px; }
+        .step { font-size: 10px; padding: 2px 6px; border: 1px solid #444; color: #444; }
+        .step.done { border-color: var(--neon); color: var(--neon); }
+
+        /* مؤشر الإحداثيات العلوي */
+        .top-coords { position: absolute; top: 15px; left: 20px; font-family: monospace; font-size: 14px; color: var(--neon); z-index: 100; }
+    </style>
+</head>
+<body>
+
+    <div id="map"></div>
+    <div class="overlay"></div>
+
+    <div class="top-coords" id="m-coords-top">00.0000°N 00.0000°E</div>
+
+    <div class="panel header">
+        <div>
+            <div style="font-size: 18px; font-weight: 700; letter-spacing: 2px;">MOD STRATEGIC COMMAND</div>
+            <div class="step-indicator">
+                <span id="s1" class="step">اختيار القاعدة</span>
+                <span id="s2" class="step">تجهيز السلاح</span>
+                <span id="s3" class="step">تأكيد الهدف</span>
+            </div>
+        </div>
+        <div style="text-align: center;">
+            <div id="sys-time" style="font-size: 24px; font-weight: 700; font-family: monospace;">00:00:00</div>
+            <div style="font-size: 12px; color: var(--danger); text-transform: uppercase;">Defcon 1 - Active Conflict</div>
+        </div>
+        <div style="text-align: left;">
+            <div style="font-size: 14px;">الحالة: <span id="status-text" style="color: var(--warning);">جاهز</span></div>
+            <div id="mission-timer" style="color: #fff; font-weight: bold;">00:00</div>
+        </div>
+    </div>
+
+    <div id="log-container" class="panel"></div>
+
+    <div class="panel missile-panel">
+        <div style="font-size: 12px; margin-bottom: 10px; border-bottom: 1px solid var(--border); padding-bottom: 5px;">نظام إدارة المقذوفات</div>
+        <div id="missile-list">
+            </div>
+    </div>
+
+    <div id="radar-container" class="panel">
+        <canvas id="radar-canvas"></canvas>
+    </div>
+
+    <div id="game-over">
+        <h1>اختراق سيادي</h1>
+        <p style="font-size: 20px;">سقطت الحدود الشمالية - انتهت المهمة</p>
+        <button onclick="location.reload()" style="background:none; border: 1px solid var(--neon); color: var(--neon); padding: 10px 40px; cursor: pointer; font-family: 'Cairo';">إعادة تشغيل النظام</button>
+    </div>
+
+    <audio id="snd-launch" src="assets/launch.mp3"></audio>
+    <audio id="snd-exp" src="assets/exp.mp3"></audio>
+    <audio id="snd-alarm" src="assets/alarm.mp3" loop></audio>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="js/config.js"></script>
+    <script src="js/border.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/enemies.js"></script>
+    <script src="js/scenario.js"></script>
+    <script src="js/game.js"></script>
+
+</body>
+</html>
