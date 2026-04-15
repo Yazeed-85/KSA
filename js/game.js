@@ -1,143 +1,215 @@
 // =============================================
-//   المتغيرات العالمية للمحرك (Core Variables)
+//   المتغيرات العالمية للمحرك (Core State)
 // =============================================
-let selectedMissile = null;
+let selectedBase = null;
 let fireMode = false;
 let trackingMode = false;
-let hitCount = 0;
 let firedCount = 0;
-let gameOver = false;
-let engagementActive = false;
+let hitCount = 0;
 let rangeCircle = null;
-let spawnInterval = null;
+let engagementActive = false;
+let gameOver = false;
+let defenseTriggered = false;
 
 // =============================================
-//   تهيئة الخريطة والنظام (Initialization)
+//   تهيئة الخريطة والنظام (Map Initialization)
 // =============================================
-const map = L.map('map', { zoomControl: false, attributionControl: false }).setView([24.5, 44.0], 6);
+const map = L.map('map', {
+    zoomControl: false,
+    attributionControl: false
+}).setView([24.5, 44.0], 6);
 
 L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
     maxZoom: 17
 }).addTo(map);
 
-// رسم القواعد عند التشغيل
+// رسم القواعد العسكرية عند التشغيل (بناءً على ملف config.js)
 militaryBases.forEach(base => {
-    const markerEl = document.createElement('div');
-    markerEl.className = `base-marker ${base.type}`;
-    markerEl.innerHTML = `<div class="base-pulse"></div><div class="base-icon"></div>`;
-    
+    const wrapper = document.createElement('div');
+    wrapper.className = 'base-wrapper';
+    wrapper.innerHTML = `
+        <div class="base-pulse-air"></div>
+        <div class="base-icon-air"></div>
+    `;
+
     const marker = L.marker(base.coords, {
-        icon: L.divIcon({ html: markerEl, className: '', iconSize: [40, 40], iconAnchor: [20, 20] })
+        icon: L.divIcon({ html: wrapper, className: '', iconSize: [44, 44], iconAnchor: [22, 22] })
     }).addTo(map);
 
+    // ربط تفاعل الضغط على القاعدة
     marker.on('click', (e) => {
         L.DomEvent.stopPropagation(e);
-        selectBase(base, marker, markerEl);
+        selectBase(base, marker, wrapper);
     });
+
+    base.marker = marker;
+    base.markerEl = wrapper;
 });
 
 // =============================================
-//   ميكانيكا القتال والإطلاق (Combat System)
+//   منطق اختيار القاعدة والسلاح (Selection Logic)
 // =============================================
-function selectMissile(type) {
-    selectedMissile = type;
-    const m = MISSILES[type];
-    document.querySelectorAll('.m-btn').forEach(b => b.classList.remove('selected'));
-    document.getElementById('btn-' + type).classList.add('selected');
-    log(`تم تذخير المنظومة بـ: ${m.name}`, 'info');
-    updateSteps();
+function selectBase(base, marker, wrapper) {
+    if (selectedBase) selectedBase.markerEl.classList.remove('selected');
+    selectedBase = base;
+    wrapper.classList.add('selected');
+
+    document.getElementById('base-info-panel').style.display = 'block';
+    document.getElementById('base-info-name').innerText = base.name;
+    document.getElementById('base-info-type').innerText = base.detail;
+    document.getElementById('sel-base-name').innerText = base.name.split(' ').slice(-2).join(' ');
+    
+    // إظهار زر الاشتباك فقط إذا تم اختيار صاروخ مسبقاً
+    document.getElementById('base-fire-btn').style.display = selectedMissile ? 'inline-block' : 'none';
+
+    if (rangeCircle) map.removeLayer(rangeCircle);
+    if (selectedMissile) drawRangeCircle();
+    
+    updateSteps(); // تحديث المؤشرات في ui.js
+    log(`تم تحديد مركز القيادة: ${base.name}`, 'info');
 }
 
+function drawRangeCircle() {
+    if (rangeCircle) map.removeLayer(rangeCircle);
+    if (!selectedBase || !selectedMissile) return;
+    const m = MISSILES[selectedMissile];
+    rangeCircle = L.circle(selectedBase.coords, {
+        radius: m.range * 1000,
+        color: m.color,
+        fillColor: m.color,
+        fillOpacity: 0.04,
+        weight: 1,
+        dashArray: '6, 6'
+    }).addTo(map);
+}
+
+// =============================================
+//   نظام الاشتباك والإطلاق (Combat System)
+// =============================================
 function enterFireMode() {
     if (!selectedBase || !selectedMissile) return;
-    fireMode = true;
+    if (engagementActive) return;
+
     engagementActive = true;
-    document.getElementById('status-text').innerText = "في انتظار الهدف...";
-    document.getElementById('status-text').style.color = 'var(--danger)';
-    updateSteps();
+    fireMode = true;
+    
+    const btn = document.getElementById('base-fire-btn');
+    btn.innerText = '🎯 انقر على الهدف...';
+    btn.style.background = '#ff6000';
+    log('تم تفعيل بروتوكول الاشتباك - بانتظار تحديد الإحداثيات', 'info');
 }
 
+// معالجة الضغط على الخريطة للإطلاق
 map.on('click', (e) => {
     if (!fireMode) return;
     
     const target = e.latlng;
+    const distMeters = map.distance(selectedBase.coords, [target.lat, target.lng]);
     const mData = MISSILES[selectedMissile];
-    const dist = map.distance(selectedBase.coords, [target.lat, target.lng]);
 
-    if (dist / 1000 > mData.range) {
-        log("الهدف خارج المدى العملياتي!", "danger");
+    firedCount++;
+    document.getElementById('fired-count').innerText = firedCount;
+
+    // تنفيذ عملية الإطلاق (بناءً على التتبع أو الموقع الثابت)
+    launchMissile(selectedBase.coords, { lat: target.lat, lng: target.lng }, distMeters, mData.range * 1000, null, trackingMode);
+
+    // إعادة ضبط الحالة
+    fireMode = false;
+    engagementActive = false;
+    document.getElementById('base-fire-btn').innerText = '🎯 تفعيل وضع الاشتباك';
+    document.getElementById('base-fire-btn').style.background = '';
+});
+
+// =============================================
+//   حركة الصواريخ والانفجارات (Animation & Effects)
+// =============================================
+function launchMissile(start, end, totalDist, maxRange, targetEnemy, useTracking) {
+    if (totalDist > maxRange) {
+        log('⚠ الهدف خارج المدى العملياتي!', 'fail');
         return;
     }
 
-    executeLaunch(selectedBase.coords, target, mData);
-    fireMode = false;
-    engagementActive = false;
-    document.getElementById('status-text').innerText = "إعادة التذخير...";
-    document.getElementById('status-text').style.color = 'var(--warning)';
-    updateSteps();
-});
+    const m = MISSILES[selectedMissile];
+    playSound('snd-missile');
 
-function executeLaunch(start, end, missileData) {
-    firedCount++;
-    playSound('snd-launch');
-    
-    // رسم مسار الصاروخ (تأثير بصري)
-    const line = L.polyline([start, start], { color: missileData.color, weight: 2, dashArray: '5, 5' }).addTo(map);
-    
-    let progress = 0;
-    const duration = 1500; // سرعة وصول الصاروخ تخيلياً
+    const duration = Math.min(3000, Math.max(1200, totalDist / m.speed * 1000));
     const startTime = performance.now();
+    const line = L.polyline([start, start], { color: m.color, weight: 1.5, dashArray: '4, 4' }).addTo(map);
 
-    function animateMissile(now) {
-        const elapsed = now - startTime;
-        progress = elapsed / duration;
+    function animate(now) {
+        let p = (now - startTime) / duration;
+        if (p > 1) p = 1;
 
-        if (progress < 1) {
-            const currentLat = start[0] + (end.lat - start[0]) * progress;
-            const currentLng = start[1] + (end.lng - start[1]) * progress;
-            line.setLatLngs([start, [currentLat, currentLng]]);
-            requestAnimationFrame(animateMissile);
-        } else {
+        const currentLat = start[0] + (end.lat - start[0]) * p;
+        const currentLng = start[1] + (end.lng - start[1]) * p;
+        line.setLatLngs([start, [currentLat, currentLng]]);
+
+        if (p < 1) requestAnimationFrame(animate);
+        else {
             map.removeLayer(line);
-            createExplosion(end, missileData);
+            createExplosion([end.lat, end.lng], false, m);
         }
     }
-    requestAnimationFrame(animateMissile);
+    requestAnimationFrame(animate);
 }
 
-function createExplosion(coords, mData) {
-    playSound('snd-exp');
-    const circle = L.circle(coords, { radius: mData.radius, color: 'orange', fillOpacity: 0.5 }).addTo(map);
+function createExplosion(coords, failed, m) {
+    playSound('snd-explosion');
+    const color = failed ? '#888' : m.color;
+    const radius = failed ? 4000 : m.radius;
+
+    const wave = L.circle(coords, { radius: radius * 0.2, color: color, fillOpacity: 0.7 }).addTo(map);
     
-    // فحص تدمير الأعداء في منطقة الانفجار
+    let step = 0;
+    const anim = setInterval(() => {
+        step++;
+        wave.setRadius(radius * (0.2 + step * 0.08));
+        wave.setStyle({ fillOpacity: 0.7 - step * 0.07 });
+        if (step > 10) { clearInterval(anim); map.removeLayer(wave); }
+    }, 80);
+
+    // تدمير الأعداء المتواجدين في منطقة الانفجار
     enemies.forEach(en => {
-        const d = map.distance([coords.lat, coords.lng], [en.lat, en.lng]);
-        if (d < mData.radius + 10000) { // مدى تدمير إضافي بسيط
+        if (en.alive && map.distance(coords, [en.lat, en.lng]) < radius) {
             en.destroy();
             hitCount++;
+            document.getElementById('hit-count').innerText = hitCount;
+            playSound('snd-destroyed');
         }
     });
-
-    setTimeout(() => map.removeLayer(circle), 500);
 }
 
 // =============================================
-//   بدء النظام (System Start)
+//   حلقة اللعبة الأساسية (Game Loop)
 // =============================================
-function triggerDefenseResponse() {
-    gameOver = true;
-    document.getElementById('game-over').style.display = 'flex';
-    playSound('snd-alarm');
-}
-
-// تشغيل المحركات
-drawRadar();
-startScenario();
-
 function gameLoop() {
     if (!gameOver) {
+        // تحديث حركة كافة الأعداء
         enemies.forEach(e => e.update());
+        
+        // تحديث حركة الصواريخ الباليستية (إن وجدت في سيناريو المرحلة 4)
+        if (typeof updateBallisticMissiles === "function") {
+            updateBallisticMissiles();
+        }
+        
         requestAnimationFrame(gameLoop);
     }
 }
-gameLoop();
+
+// =============================================
+//   بدء تشغيل النظام (System Activation)
+// =============================================
+window.onload = () => {
+    console.log("Strategic Command System: ONLINE");
+    
+    // تشغيل الرادار الصغير
+    drawRadar();
+    
+    // تشغيل سيناريو رسبون الأعداء
+    startGameSpawning();
+    
+    // بدء الحلقة البرمجية
+    gameLoop();
+    
+    log('تم استعادة الاتصال بكافة القواعد الجوية', 'success');
+};
